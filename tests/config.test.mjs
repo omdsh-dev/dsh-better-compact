@@ -80,6 +80,7 @@ test('readConfig normalizes defaults exactly per the S2 table', () => {
     summarizationProvider: '',
     summarizationModel: '',
     reasoningEffort: '',
+    customPrompt: '',
     cachePriority: true,
     maxTokens: 65536,
     compactionRetries: 1,
@@ -305,7 +306,7 @@ test('volatile references are read live and snapshots stay frozen', () => {
 
 test('stable row identities and keys match the published contract', () => {
   assert.equal(ENGINE_ENTRY_ID, 'dsh-better-compact-engine')
-  assert.deepEqual(MODES, ['native', 'goal', 'handoff'])
+  assert.deepEqual(MODES, ['native', 'goal', 'handoff', 'custom'])
   assert.equal(ROW_CONFIG_KEY, 'dsh-better-compact#dsh-better-compact')
   assert.deepEqual(ROW_CONFIG_KEYS, [
     'dsh-better-compact#dsh-better-compact',

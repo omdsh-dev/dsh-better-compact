@@ -8,8 +8,9 @@ import { Session } from '@deepseek-ai/dsh-session'
 import { readConfig, DEFAULTS } from '../src/config.js'
 import { resolveCompactSpec, resolveTargetPolicy } from '../src/budget.js'
 import { buildBudgetPreview } from '../src/inspect.js'
+import { GOAL_SECTIONS, goalInstruction } from '../src/prompts.js'
 
-const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+const source = await readFile(process.env.COMPACT_CLIENT_PATH ?? new URL('../src/client.js', import.meta.url), 'utf8')
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const text = (node) => typeof node === 'string' ? node : (node.children ?? []).map(text).join(' ')
 
@@ -32,9 +33,17 @@ async function mount(options = {}) {
   const requests = []
   let failed = options.fetchError
   let entry
-  vm.runInNewContext(source, { window: { __ModuleLoader__: { load({ factory }) { entry = factory((name) => { assert.equal(name, 'react'); return React }).BetterCompactConfigEntry } } },
+  let client
+  vm.runInNewContext(source, { window: { __ModuleLoader__: { load({ factory }) { client = factory((name) => { assert.equal(name, 'react'); return React }); entry = client.BetterCompactConfigEntry } } },
     AbortController, fetch: async (path, init) => { requests.push({ path, init }); if (failed) throw new Error('offline')
       return { ok: true, json: async () => path.includes('/models') ? { enabled: true, routes: options.routes ?? [{ provider: 'p', model: 'm', efforts: ['low', 'high'], defaultEffort: 'low' }] } : payload } } })
+  if (options.language && client.inject.includes('locale')) {
+    let dictionaries
+    client.apply({ locale: {
+      register: (_namespace, value) => { dictionaries = value; return () => {} },
+      bind: () => (key, params = {}) => String(dictionaries[options.language]?.[key] ?? key).replace(/\{(\w+)\}/g, (match, key) => params[key] ?? match),
+    }, effect: (callback) => callback(), slots: { inject: () => () => {}, register: () => () => {} } })
+  }
   const list = { ids: ['s1'], byId: { s1: { displayTitle: 'Session' } }, phase: 'ready' }
   const sessions = { list: { subscribe: () => () => {}, getSnapshot: () => list } }
   const calls = []
@@ -75,6 +84,128 @@ async function mount(options = {}) {
 }
 
 const base = { thresholdRatio: .8, headroomTokens: 100, retainRatio: .16 }
+
+test('custom default prompt mirrors goalInstruction exactly', () => {
+  const match = source.match(/const DEFAULT_CUSTOM_PROMPT = ("(?:[^"\\]|\\.)*")/)
+  assert.ok(match, 'DEFAULT_CUSTOM_PROMPT is present')
+  assert.equal(JSON.parse(match[1]), goalInstruction())
+})
+
+
+for (const mode of ['native', 'goal', 'handoff']) {
+  for (const retainMode of ['ratio', 'tokens']) {
+    test('process graph saves ' + mode + ' with ' + retainMode + ' retention through one explicit CAS mutation', async () => {
+      const ui = await mount({ value: { ...base, mode: mode === 'goal' ? 'native' : 'goal', maxTokens: 50 }, preview: true })
+      const graph = ui.by('process-editor')
+      assert.ok(graph)
+      assert.equal(graph.findAll((node) => node.props['data-bc-section']).length >= 3, true)
+      assert.equal(graph.findAll((node) => node.props['data-bc'] === 'runtime-preview' || node.props['data-bc'] === 'draft-preview-line').length, 0)
+      await ui.change('thresholdRatio', '65')
+      assert.equal(ui.input('thresholdRatio').props.value, '65')
+      await ui.change('thresholdRatio', '70')
+      assert.equal(ui.input('thresholdRatio').props.value, '70')
+      await ui.change('retainRatio', '22')
+      assert.equal(ui.input('retainRatio').props.value, '22')
+      await ui.change('retainRatio', '20')
+      assert.equal(ui.input('retainRatio').props.value, '20')
+      if (retainMode === 'tokens') {
+        await ui.change('retainMode', 'tokens')
+        await ui.change('retainTokens', '80')
+      }
+      await act(async () => ui.renderer.root.findByProps({ 'data-mode': mode }).props.onClick())
+      assert.equal(ui.by('process-result').props['data-mode-result'], mode)
+      assert.equal(ui.renderer.root.findAllByProps({ 'data-mode-flow': mode }).length, 1)
+      assert.equal(text(ui.by('draft-message-budget')), '900 tokens')
+      assert.equal(text(ui.by('draft-trigger')), '700 tokens')
+      assert.equal(text(ui.by('draft-retain')), (retainMode === 'tokens' ? '80' : '180') + ' tokens')
+      assert.equal(text(ui.by('draft-summary')), '50 tokens')
+      assert.equal(ui.calls.length, 0, 'graph editing never saves or invokes a model')
+      await ui.click('save-button')
+      assert.equal(ui.calls.length, 1)
+      assert.equal(ui.calls[0].revision, 7)
+      assert.equal(ui.value().mode, mode)
+      assert.equal(ui.value().thresholdRatio, .7)
+      assert.equal(ui.value()[retainMode === 'tokens' ? 'retainTokens' : 'retainRatio'], retainMode === 'tokens' ? 80 : .2)
+      assert.equal(ui.value()[retainMode === 'tokens' ? 'retainRatio' : 'retainTokens'], undefined)
+      assert.equal(ui.calls[0].ops.some((op) => op.path[0] === 'retainMode'), false)
+      assert.ok(ui.calls[0].ops.some((op) => op.path[0] === 'mode' && op.value === mode))
+      assert.ok(ui.requests.every(({ init }) => init.method === 'GET'))
+      ui.dispose()
+    })
+  }
+}
+
+test('custom mode requires a prompt, inserts variables, warns on unknown tokens and saves mode+customPrompt', async () => {
+  const ui = await mount({ value: { ...base, mode: 'goal' }, preview: true })
+  await act(async () => ui.renderer.root.findByProps({ 'data-mode': 'custom' }).props.onClick())
+  assert.ok(ui.input('customPrompt'))
+  assert.match(ui.input('customPrompt').props.value, /## Next Actions/)
+  assert.match(ui.input('customPrompt').props.value, /acting as a compaction engine/)
+  for (const section of GOAL_SECTIONS) assert.ok(ui.input('customPrompt').props.value.includes(section), section)
+  assert.equal(ui.by('save-button').props.disabled, false, 'the goal default is a valid starting prompt')
+  assert.match(text(ui.by('process-result')), /你的摘要 \+ 近期原文/)
+  await ui.change('customPrompt', '')
+  assert.equal(ui.by('save-button').props.disabled, true, 'clearing the prefilled prompt blocks saving')
+  await act(async () => ui.by('prompt-variable-goal').props.onClick())
+  assert.equal(ui.input('customPrompt').props.value, '{{goal}}')
+  await ui.change('customPrompt', 'Keep {{todos}} and {{unknown}}')
+  assert.match(text(ui.by('prompt-warning')), /\{\{unknown\}\}/)
+  assert.equal(ui.by('save-button').props.disabled, false)
+  await ui.click('save-button')
+  assert.equal(ui.value().mode, 'custom')
+  assert.equal(ui.value().customPrompt, 'Keep {{todos}} and {{unknown}}')
+  assert.ok(ui.calls[0].ops.some((op) => op.path[0] === 'mode' && op.value === 'custom'))
+  assert.ok(ui.calls[0].ops.some((op) => op.path[0] === 'customPrompt' && op.value === 'Keep {{todos}} and {{unknown}}'))
+  ui.dispose()
+})
+
+test('custom prefill only fills an empty prompt and never overwrites a saved prompt', async () => {
+  const saved = await mount({ value: { ...base, mode: 'goal', customPrompt: 'Keep my prompt' } })
+  await act(async () => saved.renderer.root.findByProps({ 'data-mode': 'custom' }).props.onClick())
+  assert.equal(saved.input('customPrompt').props.value, 'Keep my prompt')
+  saved.dispose()
+  const blank = await mount({ value: { ...base, mode: 'goal', customPrompt: '' } })
+  await act(async () => blank.renderer.root.findByProps({ 'data-mode': 'custom' }).props.onClick())
+  assert.match(blank.input('customPrompt').props.value, /## Next Actions/)
+  await act(async () => blank.renderer.root.findByProps({ 'data-mode': 'goal' }).props.onClick())
+  await act(async () => blank.renderer.root.findByProps({ 'data-mode': 'custom' }).props.onClick())
+  assert.match(blank.input('customPrompt').props.value, /## Next Actions/)
+  blank.dispose()
+})
+
+test('capacity handles edit the same draft with keyboard and stay in sync with the numeric ranges', async () => {
+  const ui = await mount({ value: base, preview: true })
+  const handles = ui.renderer.root.findAll((node) => node.props.role === 'slider')
+  assert.equal(handles.length, 2)
+  const trigger = handles.find((node) => String(node.props['aria-label']).startsWith('触发'))
+  const retain = handles.find((node) => String(node.props['aria-label']).startsWith('保留'))
+  assert.ok(trigger)
+  assert.ok(retain)
+  await act(async () => trigger.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }))
+  assert.equal(ui.input('thresholdRatio').props.value, '81')
+  const before = ui.input('retainRatio').props.value
+  await act(async () => retain.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }))
+  assert.notEqual(ui.input('retainRatio').props.value, before)
+  assert.equal(ui.calls.length, 0)
+  ui.dispose()
+})
+
+test('global graph controls keep effective model overrides separate and preserve them on Save', async () => {
+  const policies = [{ provider: 'p', model: 'm', thresholdRatio: .4, retainTokens: 60, maxTokens: 30 }]
+  const ui = await mount({ value: { ...base, modelPolicies: policies } })
+  await ui.change('thresholdRatio', '60')
+  await ui.change('retainRatio', '20')
+  assert.equal(ui.input('thresholdRatio').props.value, '60')
+  assert.equal(text(ui.by('draft-trigger')), '400 tokens')
+  assert.equal(text(ui.by('draft-retain')), '60 tokens')
+  assert.equal(text(ui.by('draft-summary')), '30 tokens')
+  assert.match(text(ui.by('process-override')), /覆盖规则/)
+  await ui.click('save-button')
+  assert.deepEqual(ui.value().modelPolicies, policies)
+  assert.equal(ui.value().thresholdRatio, .6)
+  assert.equal(ui.calls[0].ops.some((op) => op.path[0] === 'modelPolicies'), false)
+  ui.dispose()
+})
 
 test('draft budget uses real resolver formulas for both limiting constraints and policy inheritance', async () => {
   for (const value of [base, { ...base, thresholdRatio: .5 }, { ...base, headroomTokens: 500 },
@@ -133,7 +264,7 @@ test('native and automatic dependencies hide inapplicable controls without losin
   assert.equal(count('cachePriority'), 0)
   assert.equal(ui.input('summaryRoute').props.disabled, false)
   await ui.change('auto', false)
-  for (const name of ['maxOverflowRetries', 'compactionRetries', 'thresholdRatio', 'thresholdRatioSlider', 'retainMode']) assert.equal(count(name), 0)
+  for (const name of ['maxOverflowRetries', 'compactionRetries', 'thresholdRatio', 'retainMode']) assert.equal(count(name), 0)
   await ui.change('auto', true)
   assert.equal(ui.input('thresholdRatio').props.value, '80')
   assert.equal(ui.input('maxOverflowRetries').props.value, '1')
@@ -184,15 +315,15 @@ test('diagnostic failure leaves valid settings editable and missing budgets unkn
   ui.dispose()
 })
 
-test('runtime before/after bars use actual retained tail and hide stale previews after refresh errors', async () => {
+test('runtime facts use actual retained tail and hide stale previews after refresh errors', async () => {
   const ui = await mount({ value: { ...base, retainRatio: undefined, retainTokens: 160, maxTokens: 50 }, preview: true })
-  const barWidth = (name) => ui.by(name).findByProps({ className: 'dsh-bc-bar-track' }).children.reduce((sum, node) => sum + parseFloat(node.props.style.width), 0)
-  assert.ok(Math.abs(barWidth('before-bar') - 57) < .00001)
-  assert.ok(Math.abs(barWidth('after-bar') - 41.8) < .00001)
+  assert.match(text(ui.by('runtime-budget')), /模型窗口/)
+  assert.match(text(ui.by('runtime-budget')), /当前上下文/)
   assert.match(text(ui.by('safe-cut')), /418 tokens/)
+  assert.equal(ui.renderer.root.findAll((node) => node.props['data-bc'] === 'before-bar' || node.props['data-bc'] === 'after-bar').length, 0)
   ui.failRefresh()
   await act(async () => ui.renderer.root.findByProps({ 'aria-label': '刷新会话诊断' }).props.onClick())
-  assert.equal(ui.renderer.root.findAll((node) => node.props['data-bc'] === 'before-bar' || node.props['data-bc'] === 'after-bar' || node.props['data-bc'] === 'safe-cut').length, 0)
+  assert.equal(ui.renderer.root.findAll((node) => node.props['data-bc'] === 'safe-cut').length, 0)
   assert.match(JSON.stringify(ui.renderer.toJSON()), /诊断读取失败/)
   ui.dispose()
 })
@@ -255,7 +386,7 @@ test('custom combobox previews with keyboard, commits on Enter, and consumes Esc
   await key('End')
   const active = ui.input('summaryRoute').props['aria-activedescendant']
   const selectedOption = ui.renderer.root.findByProps({ id: active })
-  assert.equal(selectedOption.props['data-value'], JSON.stringify(['p', 'm']))
+  assert.equal(selectedOption.props['data-value'], 'custom')
   assert.equal(page().props['data-settings-dirty'], false, 'highlighting does not change the draft')
   const escape = await key('Escape')
   assert.equal(escape.defaultPrevented, true)
@@ -264,9 +395,10 @@ test('custom combobox previews with keyboard, commits on Enter, and consumes Esc
   assert.equal(ui.input('summaryRoute').props.value, '')
   await key('ArrowDown')
   await key('End')
+  await key('ArrowUp')
   await key('Enter')
-  assert.equal(ui.input('summarizationProvider').props.value, 'p')
-  assert.equal(ui.input('summarizationModel').props.value, 'm')
+  assert.equal(ui.input('summaryRoute').props.value, JSON.stringify(['p', 'm']))
+  assert.equal(ui.renderer.root.findAll((node) => typeof node.type === 'string' && node.props.name === 'summarizationProvider').length, 0)
   assert.equal(page().props['data-settings-dirty'], true)
   await key('Home')
   await key('Enter')
@@ -319,13 +451,16 @@ test('retention drafts survive mode switches without creating false dirty state 
 
 test('diagnostics and draft allocation stay separate, advanced summaries expose only nondefault settings, and help consumes Escape', async () => {
   const ui = await mount({ value: base, preview: true })
-  const status = ui.renderer.root.findByProps({ 'data-bc-section': 'status' })
-  const names = status.findAll((node) => typeof node.type === 'string' && node.props.name).map((node) => node.props.name)
-  assert.deepEqual(names, ['inspectSession'])
+  const status = ui.by('diagnostics')
+  assert.equal(status.props['data-bc-section'], 'diagnostics')
+  assert.equal(status.findAll((node) => typeof node.type === 'string' && node.props.name).length, 0)
   assert.equal(ui.by('draft-budget').findAllByProps({ 'data-bc': 'runtime-trigger' }).length, 0)
-  assert.match(text(ui.by('advanced-summary')), /余量/)
+  assert.equal(ui.renderer.root.findAllByProps({ 'data-bc': 'advanced-summary' }).length, 0)
   assert.equal(ui.by('advanced').props.open, undefined)
-  const explain = ui.renderer.root.findAll((node) => node.type === 'details' && node.props.className === 'dsh-bc-explanation')[0]
+  const retries = await mount({ value: { ...base, compactionRetries: 2 }, preview: true })
+  assert.match(text(retries.by('advanced-summary')), /压力(?:残留)?重试/)
+  retries.dispose()
+  const explain = ui.by('advanced')
   let focused = false
   const target = { open: true, querySelector: () => ({ focus: () => { focused = true } }) }
   const event = { key: 'Escape', currentTarget: target, defaultPrevented: false, stopped: false,
@@ -339,4 +474,19 @@ test('diagnostics and draft allocation stay separate, advanced summaries expose 
   const defaults = await mount({ window: 200000 })
   assert.equal(defaults.renderer.root.findAllByProps({ 'data-bc': 'advanced-summary' }).length, 0)
   defaults.dispose()
+})
+
+
+test('process presentation preserves the client locale contract', async () => {
+  const localized = source.includes('function bindLocale')
+  const ui = await mount({ value: base, language: 'en' })
+  const graph = text(ui.renderer.root.findByProps({ 'data-better-compact': 'page' }))
+  assert.ok(graph.includes(localized ? 'Compaction' : '上下文压缩'))
+  assert.ok(graph.includes(localized ? 'Capacity and trigger' : '容量与触发'))
+  const aria = ui.renderer.root.findByProps({ 'data-mode': 'native' }).props['aria-label']
+  assert.equal(aria.startsWith(localized ? 'Native' : '原生'), true)
+  await act(async () => ui.renderer.root.findByProps({ 'data-mode': 'handoff' }).props.onClick())
+  assert.ok(text(ui.renderer.root.findAllByProps({ 'data-mode-flow': 'handoff' })[0]).includes(localized ? 'Handoff body' : '交接正文'))
+  assert.equal(ui.calls.length, 0)
+  ui.dispose()
 })

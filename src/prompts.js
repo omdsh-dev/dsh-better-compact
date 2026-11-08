@@ -43,6 +43,24 @@ export const HANDOFF_SECTIONS = Object.freeze([
 /** Marker that identifies a handoff document in a native checkpoint. */
 export const HANDOFF_TITLE = '# Session Handoff'
 
+/**
+ * Variables accepted by the custom-mode prompt editor and runtime expander.
+ * Keep the tokens in sync with the client-side chip toolbar; the browser
+ * client is an independent closure and cannot import this module.
+ */
+export const PROMPT_VARIABLES = Object.freeze([
+  Object.freeze({ token: 'goal', label: '目标', hint: '当前目标 objective' }),
+  Object.freeze({ token: 'todos', label: '待办', hint: '当前待办列表' }),
+  Object.freeze({ token: 'questions', label: '待答问题', hint: '仍等待用户回答的问题' }),
+  Object.freeze({ token: 'jobs', label: '后台任务', hint: '运行中的后台任务' }),
+  Object.freeze({ token: 'children', label: '子代理', hint: '运行中的子代理' }),
+  Object.freeze({ token: 'date', label: '日期', hint: '压缩时的 ISO 时间' }),
+  Object.freeze({ token: 'session', label: '会话 ID', hint: '当前会话标识' }),
+  Object.freeze({ token: 'model', label: '摘要模型', hint: 'provider/model' }),
+  Object.freeze({ token: 'trigger', label: '触发比例', hint: '有效触发百分比' }),
+  Object.freeze({ token: 'retain', label: '保留预算', hint: '固定 tokens 或百分比' }),
+])
+
 const COMMON_RULES = [
   '- Preserve exact file paths, commands, error strings, identifiers, numeric values, function signatures, and syntax fragments verbatim.',
   '- Capture user feedback and explicit instructions faithfully, especially corrections.',
@@ -208,6 +226,124 @@ export function omittedStateNames(state) {
   return names
 }
 
+/** Format a ratio as a stable percentage string. */
+function percentText(ratio) {
+  return `${Math.round(ratio * 1000) / 10}%`
+}
+
+/** Render one list variable, capped with an explicit omission note. */
+function listVariable(items, limit, render, empty, noun) {
+  const list = Array.isArray(items) ? items : []
+  if (list.length === 0) return empty
+  const lines = list.slice(0, limit).map(render)
+  if (list.length > limit) lines.push(`- (${list.length - limit} more ${noun} omitted)`)
+  return lines.join('\n')
+}
+
+/**
+ * Build the value map for the ten custom-mode variables. This is the single
+ * place where authoritative state becomes prompt text; the custom instruction
+ * itself receives no automatic state block.
+ *
+ * @param {object} state - collected authoritative state.
+ * @param {object} [context] - effective route facts.
+ * @param {object | null} [context.target] - resolved summary target.
+ * @param {object | null} [context.policy] - resolved effective policy.
+ * @param {string} [context.sessionId] - current session id.
+ * @param {Date} [context.now] - clock seam for tests.
+ * @returns {Record<string, string>} variable values.
+ */
+export function customPromptVariables(state, context = {}) {
+  const values = {}
+  const goal = state?.goal ?? null
+  values.goal = goal === null
+    ? (state?.goalError === undefined ? '(no authoritative goal)' : `(goal state unavailable: ${clip(state.goalError)})`)
+    : clip(goal.objective, 2000)
+  values.todos = listVariable(
+    state?.todos,
+    40,
+    (todo) => `- [${todo.status}] ${clip(todo.content)}`,
+    '(no todos)',
+    'todos',
+  )
+  values.questions = listVariable(
+    state?.questions,
+    10,
+    (question) => {
+      const items = Array.isArray(question.questions) ? question.questions : []
+      const text = items.map((item) => clip(item.question, 800)).filter(Boolean).join(' | ')
+      return `- callId ${question.callId} (${question.state}): ${text.length > 0 ? text : '(no question text)'}`
+    },
+    '(no pending questions)',
+    'questions',
+  )
+  values.jobs = listVariable(
+    state?.jobs,
+    20,
+    (job) => `- ${job.id} (${job.kind}, ${job.status}): ${clip(job.label)}`,
+    '(no running jobs)',
+    'jobs',
+  )
+  values.children = listVariable(
+    state?.children,
+    20,
+    (child) => `- ${child.id}${child.depth === undefined ? '' : ` (depth ${child.depth})`}: ${clip(child.label ?? 'running')}`,
+    '(no running child agents)',
+    'children',
+  )
+  values.date = (context.now instanceof Date ? context.now : new Date()).toISOString()
+  values.session = context.sessionId ?? ''
+  values.model = context.target === undefined || context.target === null
+    ? '(unknown summary model)'
+    : `${context.target.provider}/${context.target.model}`
+  const policy = context.policy ?? null
+  values.trigger = policy !== null && Number.isFinite(policy.thresholdRatio)
+    ? percentText(policy.thresholdRatio)
+    : '(unknown trigger)'
+  values.retain = policy === null
+    ? '(unknown retention)'
+    : policy.retainTokens !== undefined && policy.retainTokens !== null
+      ? `${policy.retainTokens} tokens`
+      : Number.isFinite(policy.retainRatio)
+        ? percentText(policy.retainRatio)
+        : '(unknown retention)'
+  return values
+}
+
+/**
+ * Expand one custom instruction. Known variables are replaced once; unknown
+ * variables stay literal and values are never recursively expanded.
+ * @param {string} template - user-authored instruction.
+ * @param {Record<string, string>} [variables] - variable values.
+ * @returns {string} expanded text.
+ */
+export function expandCustomPrompt(template, variables = {}) {
+  if (typeof template !== 'string') return ''
+  return template.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (match, name) =>
+    Object.prototype.hasOwnProperty.call(variables, name) && variables[name] !== undefined
+      ? String(variables[name])
+      : match,
+  )
+}
+
+/**
+ * Build the custom-mode instruction. Unlike goal/handoff, this is exactly the
+ * expanded prompt: no built-in structure, state block, or safety rules.
+ * @param {string} template - user-authored instruction.
+ * @param {Record<string, string>} [variables] - variable values.
+ * @returns {string} final instruction text.
+ * @throws {Error} with code BETTER_COMPACT_PROMPT when the result is empty.
+ */
+export function buildCustomInstruction(template, variables = {}) {
+  const text = expandCustomPrompt(template, variables).trim()
+  if (text.length === 0) {
+    const error = new Error('custom prompt is empty after variable expansion; write an instruction or choose another mode')
+    error.code = 'BETTER_COMPACT_PROMPT'
+    throw error
+  }
+  return text
+}
+
 /**
  * Assemble the final instruction used as the last user message.
  * @param {'goal' | 'handoff'} mode - enhanced mode.
@@ -262,6 +398,9 @@ export function assertSummaryStructure(text, mode) {
     error.code = 'BETTER_COMPACT_STRUCTURE'
     throw error
   }
+  // Custom mode deliberately accepts any non-empty text; the user owns the
+  // instruction and there is no built-in section contract to enforce.
+  if (mode === 'custom') return
   const required = mode === 'handoff' ? HANDOFF_SECTIONS : GOAL_SECTIONS
   const missing = required.filter((heading) => !text.includes(heading))
   if (missing.length > 0) {

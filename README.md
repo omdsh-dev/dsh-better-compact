@@ -26,7 +26,7 @@
 
 ## 它做什么
 
-- native / goal / file-handoff 三种模式
+- native / goal / file-handoff / custom 四种模式（custom 提示词默认填入 goal 指令模板）
 - 预算、阈值、headroom 与保留策略
 - 摘要模型 / 路由 / 输出预留
 - 只读诊断与实时过程可视化

@@ -45,7 +45,10 @@ export const ROW_CONFIG_KEYS = Object.freeze([
 ])
 
 /** Supported compaction modes. */
-export const MODES = Object.freeze(['native', 'goal', 'handoff'])
+export const MODES = Object.freeze(['native', 'goal', 'handoff', 'custom'])
+
+/** Maximum characters accepted for a custom-mode instruction. */
+export const MAX_CUSTOM_PROMPT_CHARS = 8000
 
 /** Native keys accepted by `BasicCompactionEngine` (native semantics/units). */
 export const NATIVE_CONFIG_KEYS = Object.freeze([
@@ -78,7 +81,7 @@ export const MODEL_POLICY_KEYS = Object.freeze([
 ])
 
 /** Enhanced-only keys stripped before the native engine sees the config. */
-export const ENHANCED_CONFIG_KEYS = Object.freeze(['mode', 'reasoningEffort', 'cachePriority'])
+export const ENHANCED_CONFIG_KEYS = Object.freeze(['mode', 'reasoningEffort', 'cachePriority', 'customPrompt'])
 
 /** Complete accepted top-level key set. */
 export const CONFIG_KEYS = Object.freeze([
@@ -99,6 +102,7 @@ export const DEFAULTS = Object.freeze({
   summarizationProvider: '',
   summarizationModel: '',
   reasoningEffort: '',
+  customPrompt: '',
   cachePriority: true,
   maxTokens: null,
   compactionRetries: 1,
@@ -159,6 +163,7 @@ export const Config = z.object({
   summarizationProvider: z.string().default(DEFAULTS.summarizationProvider).volatile(),
   summarizationModel: z.string().default(DEFAULTS.summarizationModel).volatile(),
   reasoningEffort: z.string().default(DEFAULTS.reasoningEffort).volatile(),
+  customPrompt: z.string().max(MAX_CUSTOM_PROMPT_CHARS).default(DEFAULTS.customPrompt).volatile(),
   cachePriority: z.boolean().default(DEFAULTS.cachePriority).volatile(),
   maxTokens: z.natural().min(1).volatile(),
   compactionRetries: z.natural().default(DEFAULTS.compactionRetries).volatile(),
@@ -398,6 +403,11 @@ export function readConfig(config) {
     throw new TypeError('reasoningEffort must be empty or an exact opaque model effort id')
   }
 
+  const customPrompt = fieldOf(source, 'customPrompt') ?? DEFAULTS.customPrompt
+  if (typeof customPrompt !== 'string') throw new TypeError('customPrompt must be a string (empty unless mode is custom)')
+  if (customPrompt.length > MAX_CUSTOM_PROMPT_CHARS) throw new TypeError(`customPrompt must be at most ${MAX_CUSTOM_PROMPT_CHARS} characters, got ${customPrompt.length}`)
+  if (mode === 'custom' && customPrompt.trim().length === 0) throw new TypeError('customPrompt is required when mode is custom; write an instruction or choose another mode')
+
   const cachePriority = fieldOf(source, 'cachePriority') ?? DEFAULTS.cachePriority
   if (typeof cachePriority !== 'boolean') throw new TypeError(`cachePriority must be a boolean, got ${String(cachePriority)}`)
 
@@ -439,6 +449,7 @@ export function readConfig(config) {
     summarizationProvider,
     summarizationModel,
     reasoningEffort,
+    customPrompt,
     cachePriority,
     maxTokens,
     compactionRetries,

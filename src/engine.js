@@ -31,9 +31,11 @@ import { configEquals, deepFreeze, toNativeConfig } from './config.js'
 import { BudgetConfigError, resolveTargetPolicy, routedTarget } from './budget.js'
 import {
   assertSummaryStructure,
+  buildCustomInstruction,
   buildInstruction,
   composeHandoffDocument,
   continuationText,
+  customPromptVariables,
   redactContentBlocks,
   redactSecrets,
   omittedStateNames,
@@ -347,14 +349,33 @@ export class BetterCompactEngine extends BasicCompactionEngine {
     )
   }
 
-  /** Enhanced-mode summarization (goal or handoff). */
+  /** Build the custom-mode instruction; the expanded prompt is the whole request. */
+  _customInstruction(input, state, info, maxTokens, sessionId, target, policy) {
+    const variables = customPromptVariables(state, { target, policy, sessionId })
+    const instruction = buildCustomInstruction(this.snapshot.customPrompt, variables)
+    const contextWindow = info?.context?.contextWindow
+    if (contextWindow !== undefined) {
+      const estimated = this._estimateRequest(input, instruction)
+      if (estimated + maxTokens > contextWindow) {
+        throw new LlmError(
+          `the custom prompt plus the replayed conversation plus maxTokens ${maxTokens} exceeds the ${contextWindow}-token context window of ${target.provider}/${target.model}; shorten the prompt, lower maxTokens, or choose a larger summary model`,
+          'BETTER_COMPACT_BUDGET',
+        )
+      }
+    }
+    return instruction
+  }
+
+  /** Enhanced-mode summarization (goal, handoff, or custom). */
   async _summarizeEnhanced(input, agent, signal) {
     const { target, policy } = this._resolveRoute(agent)
     const maxTokens = policy.maxTokens
     const info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
     const effort = this._resolveEffort(info)
     const state = collectAuthoritativeState(this.ctx, agent)
-    const instruction = this._chooseInstruction(input, state, info, maxTokens, agent.session.id)
+    const instruction = this.mode === 'custom'
+      ? this._customInstruction(input, state, info, maxTokens, agent.session.id, target, policy)
+      : this._chooseInstruction(input, state, info, maxTokens, agent.session.id)
     const finalMessage = deepFreeze({
       role: 'user',
       content: [{ type: 'text', text: instruction }],

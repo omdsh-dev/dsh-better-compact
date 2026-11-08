@@ -24,7 +24,7 @@ const preset = loadPatch(new URL('presets/better-compact.patch.yml', root))
 
 test('package metadata matches the published contract', () => {
   assert.equal(pkg.name, 'dsh-better-compact')
-  assert.equal(pkg.version, '0.3.1')
+  assert.equal(pkg.version, '0.4.0')
   assert.equal(pkg.license, 'Apache-2.0')
   const license = readFileSync(new URL('LICENSE', root), 'utf8')
   assert.equal(createHash('sha256').update(license).digest('hex'), 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30')
