@@ -1,7 +1,7 @@
 /**
  * Budget and safe-cut adapter for dsh-better-compact.
  *
- * The DSH 0.2.2-rc.1 `@deepseek-ai/dsh-compaction-basic` build is a bundled
+ * The DSH 0.2.2-rc.2 `@deepseek-ai/dsh-compaction-basic` build is a bundled
  * library that does not export its config resolution, capacity scaling, or
  * retention selection helpers. This module re-implements exactly those rules
  * for two consumers that must agree:

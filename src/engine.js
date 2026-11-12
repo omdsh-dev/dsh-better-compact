@@ -128,7 +128,7 @@ export class BetterCompactEngine extends BasicCompactionEngine {
       )
     }
     const snapshot = companion.snapshot()
-    // Gate the native listeners at their public registration boundary. In rc.1
+    // Gate the native listeners at their public registration boundary. In rc.2
     // model-switch pressure no longer dispatches through compactIfNeeded(), so
     // guarding that method alone lets the host compact another preset's session.
     // Keep native callbacks (including proposed-header pricing) unchanged.

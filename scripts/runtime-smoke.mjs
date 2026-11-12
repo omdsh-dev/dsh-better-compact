@@ -44,7 +44,7 @@ process.env.DSH_HOME = home
 process.env.DSH_TELEMETRY_DISABLED = '1'
 
 const hostPackage = JSON.parse(await readFile(join(dsh, 'package.json'), 'utf8'))
-assert.equal(hostPackage.version, '0.2.2-rc.1', 'smoke requires the exact supported host')
+assert.equal(hostPackage.version, '0.2.2-rc.2', 'smoke requires the exact supported host')
 const appBoot = await import(at('dsh-app-boot/lib/index.js'))
 const { PROFILE_TEMPLATES } = await import(at('dsh-official-bundles/lib/index.js'))
 const { symbols } = await import(at('cordis/lib/index.js'))
@@ -566,7 +566,7 @@ try {
   assert.equal(modelsPost.response.headers.get('allow'), 'GET')
   check('models-route-allowed-catalog')
 
-  // rc.1 prepares a proposed header before persisting the model switch. Use
+  // rc.2 prepares a proposed header before persisting the model switch. Use
   // real model.select + AgentLoop dispatch in all three ownership realms.
   for (const preset of [null, 'better-compact', 'standard']) {
     const switched = preset === null ? await createHostAgent(ctx) : await createPresetAgent(ctx, preset)
