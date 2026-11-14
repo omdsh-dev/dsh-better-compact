@@ -29,6 +29,7 @@
 - native / goal / file-handoff / custom 四种模式（custom 提示词默认填入 goal 指令模板）
 - 预算、阈值、headroom 与保留策略
 - 摘要模型 / 路由 / 输出预留
+- 检查点摘要可渲染成图片附加（[summaryImage](docs/SUMMARY-IMAGE.md)）
 - 只读诊断与实时过程可视化
 
 <p align="center">
@@ -47,6 +48,8 @@ dsh plugin --profile <profile> add dsh-better-compact@0.4.1
 # 或安装 Better DSH（会自动带上所有独立插件）
 dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
 ```
+
+包内直接带预构建的 `lib/`，安装即用，不需要本地构建。
 
 > 安装 / 升级 / 换包后必须重启对应 profile；只刷新网页不够。
 
@@ -76,9 +79,21 @@ dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
 
 ## 开发
 
+源码是 TypeScript，`lib/` 是 tsdown 的预构建产物并随仓库提交；改源码后必须重建。
+
 ```sh
-npm test        # 单元 / 组件测试
-npm run smoke   # 如仓库提供运行时冒烟
+npm install                        # 构建与测试工具链
+node scripts/link-dsh-types.mjs    # 指向已安装的 DSH 运行时，取到 @deepseek-ai/* 类型
+npm run typecheck                  # tsc --noEmit（host 面 + client 面）
+npm test                           # 单元 / 组件测试
+npm run build                      # tsdown + tsc 声明，重建 lib/
+npm run smoke                      # 真实 profile 运行时冒烟（需要 rc.2 宿主）
+```
+
+以源码形态装进 profile 时用本地路径，改完重建 `lib/` 再重启：
+
+```sh
+dsh plugin --profile <profile> add /absolute/path/to/dsh-better-compact
 ```
 
 实现与测试说明见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。

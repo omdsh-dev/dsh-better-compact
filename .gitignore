@@ -1,4 +1,8 @@
 node_modules/
+# 隔离的 DSH 开发运行时（scripts/link-dsh-types.mjs 的来源之一，不入库）
+.dsh-dev/
+# CI 里 typecheck 用的临时 DSH 运行时前缀
+.dsh-types/
 .worktrees/
 *.tgz
 *.log

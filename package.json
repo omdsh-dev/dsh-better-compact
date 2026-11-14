@@ -12,11 +12,18 @@
     "access": "public"
   },
   "type": "module",
-  "main": "src/index.js",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
-    "./engine": "./src/engine.js",
-    "./client": "./src/client.js",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./engine": {
+      "types": "./lib/types/engine.d.ts",
+      "default": "./lib/engine.js"
+    },
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "engines": {
@@ -24,35 +31,38 @@
     "dsh": "0.2.2-rc.2"
   },
   "scripts": {
-    "test": "node --test",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\" \"tests/**/*.test.tsx\"",
+    "build": "tsdown && tsc -p tsconfig.build.json",
     "smoke": "node scripts/runtime-smoke.mjs"
   },
   "files": [
-    "src",
+    "lib",
     "presets",
-    "docs",
     "cordis.patch.yml",
+    "docs",
     "README.md",
     "LICENSE",
     "third-party"
   ],
   "dependencies": {
-    "@deepseek-ai/schemastery": "~3.19.0"
+    "@deepseek-ai/schemastery": "~3.19.0",
+    "@napi-rs/canvas": "^1.1.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
     "@deepseek-ai/dsh-agent": "0.2.2-rc.2",
     "@deepseek-ai/dsh-agent-preset": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.2",
     "@deepseek-ai/dsh-compaction": "0.2.2-rc.2",
     "@deepseek-ai/dsh-compaction-basic": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
     "@deepseek-ai/dsh-session": "0.2.2-rc.2",
     "@deepseek-ai/dsh-session-projection": "0.2.2-rc.2",
     "@deepseek-ai/dsh-session-query": "0.2.2-rc.2",
     "@deepseek-ai/dsh-token-meter": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.2",
-    "react": "^18.2.0",
-    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.2"
+    "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-client-connection": {
@@ -69,9 +79,21 @@
     }
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/js-yaml": "^4.0.9",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.20.1",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.0",
     "js-yaml": "^4.2.0",
+    "jsdom": "^29.1.1",
     "react": "18.3.1",
-    "react-test-renderer": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-test-renderer": "18.3.1",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3"
   },
   "dsh": {
     "bundle": {
