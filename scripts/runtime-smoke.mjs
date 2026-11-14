@@ -29,6 +29,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, writeFile, cp, symlink, rm, stat, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -36,15 +37,54 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const dsh = process.env.DSH_PACKAGE_ROOT
-if (!dsh) throw new Error('Set DSH_PACKAGE_ROOT to the installed @deepseek-ai/dsh package directory')
+
+const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+
+/**
+ * DSH_PACKAGE_ROOT may name the dsh package directory itself, its
+ * `@deepseek-ai` parent, or a runtime root holding `node_modules/@deepseek-ai`
+ * (e.g. the isolated `.dsh-dev/runtime` checkout). All three resolve here.
+ */
+function resolveDshPackage(value) {
+  const candidates = [
+    join(value, 'package.json'),
+    join(value, 'dsh', 'package.json'),
+    join(value, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+  ]
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    // A runtime root has its own package.json; only accept the real host package.
+    try {
+      if (JSON.parse(readFileSync(candidate, 'utf8')).name === '@deepseek-ai/dsh') {
+        return dirname(candidate)
+      }
+    } catch {
+      // not a JSON manifest: keep looking
+    }
+  }
+  throw new Error(
+    'DSH_PACKAGE_ROOT=' + value + ' holds no @deepseek-ai/dsh; point it at the dsh package,'
+    + ' its @deepseek-ai directory, or a runtime root such as .dsh-dev/runtime',
+  )
+}
+
+if (!process.env.DSH_PACKAGE_ROOT) {
+  throw new Error('Set DSH_PACKAGE_ROOT to the installed @deepseek-ai/dsh package directory')
+}
+const dsh = resolveDshPackage(resolve(process.env.DSH_PACKAGE_ROOT))
 const at = (name) => pathToFileURL(join(dirname(dsh), name)).href
 const home = await mkdtemp(join(tmpdir(), 'dsh-better-compact-smoke-'))
 process.env.DSH_HOME = home
 process.env.DSH_TELEMETRY_DISABLED = '1'
 
+// The supported host is the one `engines.dsh` pins; keep the two in lockstep
+// instead of repeating the version here.
 const hostPackage = JSON.parse(await readFile(join(dsh, 'package.json'), 'utf8'))
-assert.equal(hostPackage.version, '0.2.2-rc.2', 'smoke requires the exact supported host')
+assert.equal(
+  hostPackage.version,
+  pkg.engines.dsh,
+  'smoke requires host ' + pkg.engines.dsh + ' (engines.dsh), found ' + hostPackage.version,
+)
 const appBoot = await import(at('dsh-app-boot/lib/index.js'))
 const { PROFILE_TEMPLATES } = await import(at('dsh-official-bundles/lib/index.js'))
 const { symbols } = await import(at('cordis/lib/index.js'))
@@ -55,20 +95,32 @@ const profileDir = appBoot.resolveProfileDir('it', home)
 appBoot.initProfile(profileDir, [...PROFILE_TEMPLATES.headless.bundles, 'dsh-better-compact'])
 
 // Install a published-layout copy: only shipped files, with peers resolved from
-// the same runtime as the host. No copied node_modules, no .git, no specs.
-const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+// the same runtime as the host. No copied node_modules, no .git, no src/, no
+// specs. The shipped payload is the prebuilt lib/ tree, so a stale or missing
+// build must abort here instead of booting a half-populated package.
+const SHIPPED_ARTIFACTS = ['lib/index.js', 'lib/engine.js', 'lib/client.js']
+const missing = [...pkg.files, ...SHIPPED_ARTIFACTS]
+  .filter((name) => !existsSync(join(root, name)))
+if (missing.length > 0) {
+  throw new Error('published layout is incomplete (' + missing.join(', ') + '); run npm run build first')
+}
+assert.equal(pkg.files.includes('src'), false, 'the published layout does not ship src/ any more')
 const modules = join(profileDir, 'node_modules')
 await mkdir(modules, { recursive: true })
 const pluginDir = join(modules, 'dsh-better-compact')
 await mkdir(pluginDir, { recursive: true })
 await cp(join(root, 'package.json'), join(pluginDir, 'package.json'))
 for (const name of pkg.files) {
-  try {
-    await cp(join(root, name), join(pluginDir, name), { recursive: true })
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error
-  }
+  await cp(join(root, name), join(pluginDir, name), { recursive: true })
 }
+// What got installed is the published layout: three build products, and the
+// browser half still opening with the module-loader banner.
+const clientBundle = await readFile(join(pluginDir, 'lib', 'client.js'), 'utf8')
+assert.match(
+  clientBundle,
+  /^\s*window\.__ModuleLoader__\.load\(\{\s*id:\s*(['"])dsh-better-compact\1/,
+  'lib/client.js must open with the ModuleLoader banner',
+)
 await symlink(dirname(dsh), join(modules, '@deepseek-ai'))
 const manifestPath = join(profileDir, 'package.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))

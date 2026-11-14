@@ -1,0 +1,11 @@
+{
+  "//": "Client-face typecheck: browser half + the shared contract only. Keeps node-only types out of the client graph (the tsdown client bundle inlines src/shared).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/client",
+    "src/shared"
+  ]
+}
