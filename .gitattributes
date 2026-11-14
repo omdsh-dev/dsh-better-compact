@@ -1,0 +1,21 @@
+# Normalize every text file to LF on checkout and commit, so a Windows
+# working copy (core.autocrlf=true) cannot reintroduce CRLF noise into diffs.
+* text=auto eol=lf
+
+# Prebuilt bundles are generated, not edited: same rule, explicit.
+lib/** text eol=lf
+
+# Binary artefacts.
+*.zstd binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.node binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
