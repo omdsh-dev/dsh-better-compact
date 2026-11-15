@@ -264,6 +264,10 @@ export const STYLE = `
 .dsh-bc-strategy-extra{display:flex;flex-direction:column;gap:8px;min-width:0}
 .dsh-bc-cache-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .dsh-bc-cache-row .dsh-bc-setting-main{flex:1;min-width:200px}
+.dsh-bc-font-row{display:flex;flex-direction:column;gap:6px;min-width:0}
+.dsh-bc-font-line{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.dsh-bc-font-line .dsh-bc-caption{flex:1;min-width:200px}
+.dsh-bc-font-error{color:var(--cfg-danger)}
 .dsh-bc-process-path{margin:0;padding:8px 10px;border:1px solid var(--cfg-line);border-radius:var(--cfg-r-sm);background:var(--cfg-sunken);font-size:12px;line-height:20px}
 .dsh-bc-process-result{margin:0;font-size:15px;line-height:24px;font-weight:500}
 .dsh-bc-prompt-hint{margin:0}

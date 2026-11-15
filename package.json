@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-compact",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Independent DSH compaction plugin: native, goal-aware, and file-handoff checkpoints with a read-only inspect API.",
   "license": "Apache-2.0",
   "repository": {
@@ -34,7 +34,8 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node --import tsx --test \"tests/**/*.test.ts\" \"tests/**/*.test.tsx\"",
     "build": "tsdown && tsc -p tsconfig.build.json",
-    "smoke": "node scripts/runtime-smoke.mjs"
+    "smoke": "node scripts/runtime-smoke.mjs",
+    "font:fetch": "node --import tsx scripts/fetch-font.mjs"
   },
   "files": [
     "lib",
@@ -56,6 +57,7 @@
     "@deepseek-ai/dsh-client-connection": "0.2.2-rc.2",
     "@deepseek-ai/dsh-compaction": "0.2.2-rc.2",
     "@deepseek-ai/dsh-compaction-basic": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.2-rc.2",
     "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.2-rc.2",
     "@deepseek-ai/dsh-session": "0.2.2-rc.2",

@@ -187,9 +187,16 @@ export declare class BetterCompactEngine extends BasicCompactionEngine {
      * carries them; an adapter that refuses image input fails that request after
      * the checkpoint was already committed, which leaves the session unable to
      * continue. The check therefore uses the conversation target, not the summary
-     * target. An undisclosed modality list stays fail-open: absence means unknown,
-     * and aborting compaction over an unknown capability would be worse than the
-     * rendering attempt itself.
+     * target — and it asks the agent for the *next step's* choice
+     * (`agent.model.current()`), not the last durable request header. During a
+     * model switch the host compacts against a proposed header before that header
+     * is recorded, so the header still names the model being left; validating it
+     * would commit an image-only checkpoint for a text-only destination.
+     * `current()` already falls back from recorded choices to the last request and
+     * then the agent's live options, so the older lookups only cover a host that
+     * exposes no `model` accessor. An undisclosed modality list stays fail-open:
+     * absence means unknown, and aborting compaction over an unknown capability
+     * would be worse than the rendering attempt itself.
      * @param agent - owner of the compacted session.
      * @param signal - cancellation forwarded to model resolution.
      * @throws {LlmError} with code BETTER_COMPACT_IMAGE when the model is text-only.

@@ -25,14 +25,23 @@
  *
  * `@napi-rs/canvas` is a native module, so it is imported lazily: a host that
  * never renders a summary neither pays for loading it nor fails when the
- * prebuilt binary is missing. Font probing prefers a real CJK family, because a
- * fallback face without CJK coverage renders the summary as empty boxes.
+ * prebuilt binary is missing.
  *
- * The renderer is pure: no module-level cache, no font registered between calls,
- * no disk writes — the same request always produces the same bytes on the same
- * machine, and every page is a fresh canvas.
+ * The face is fixed, not discovered: the caller passes the absolute path of the
+ * pinned Noto Sans SC file downloaded by `src/font.ts`. Relying on system
+ * fonts would make the same checkpoint render differently on Linux, macOS and
+ * Windows, and a CJK-less fallback face would render the summary as empty
+ * boxes. The registered family is memoized per path, and every page is a fresh
+ * canvas, so the same request still produces the same bytes on the same machine.
  */
 import type { SummaryImagePage, SummaryImageRequest } from './shared/contract.ts';
+/** Required render options: the fixed face plus an optional page cap. */
+export interface SummaryImageRenderOptions {
+    /** Absolute path of the installed fixed font file. */
+    readonly fontPath: string;
+    /** Hard page cap; defaults to `SUMMARY_IMAGE_MAX_PAGES`. */
+    readonly maxPages?: number;
+}
 /**
  * Render a checkpoint summary as PNG page image(s).
  *
@@ -42,8 +51,8 @@ import type { SummaryImagePage, SummaryImageRequest } from './shared/contract.ts
  * retry is dropped with an explicit omission marker on the last page, so the
  * caller never receives an unbounded image list and nothing disappears silently.
  * @param request - the checkpoint text and its header line.
- * @param maxPages - hard page cap; defaults to `SUMMARY_IMAGE_MAX_PAGES`.
+ * @param options - the fixed font path and the hard page cap.
  * @returns one page per chunk of body text, in order; always at least one page.
- * @throws Error when `@napi-rs/canvas` cannot load or no CJK font is available.
+ * @throws Error when `@napi-rs/canvas` cannot load or the fixed font is unusable.
  */
-export declare function renderSummaryImages(request: SummaryImageRequest, maxPages?: number): Promise<readonly SummaryImagePage[]>;
+export declare function renderSummaryImages(request: SummaryImageRequest, options: SummaryImageRenderOptions): Promise<readonly SummaryImagePage[]>;

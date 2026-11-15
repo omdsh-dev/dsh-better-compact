@@ -46,6 +46,11 @@ export const MAX_CUSTOM_PROMPT_CHARS = 8000
 export const INSPECT_PATH = '/better-compact/api/inspect'
 /** Exact read-only models route pathname. */
 export const MODELS_PATH = '/better-compact/api/models'
+/**
+ * Exact fixed-font route pathname: `GET` reports the asset status, `POST`
+ * downloads and installs the pinned checkpoint font.
+ */
+export const FONT_PATH = '/better-compact/api/font'
 /** Slot namespace the settings row is registered under. */
 export const ROW_CONFIG_SLOT = 'plugins.row.config'
 /** Locale namespace shared by the client half and the settings slot. */
@@ -107,6 +112,29 @@ export interface SummaryImageRequest {
   readonly text: string
   /** Short header line rendered above the body, e.g. session and mode. */
   readonly title: string
+}
+
+/**
+ * Installed state of the fixed checkpoint font, as reported by the settings
+ * page route. `bytes`/source fields stay null while the font is not installed.
+ */
+export interface FontStatusPayload {
+  /** True when a verified font for the pinned version is cached locally. */
+  readonly installed: boolean
+  /** Pinned npm package the face comes from. */
+  readonly package: string
+  /** Pinned package version. */
+  readonly version: string
+  /** Family name the renderer draws with. */
+  readonly family: string
+  /** Installed font file size in bytes, or null when not installed. */
+  readonly bytes: number | null
+  /** Download size of the pinned npm tarball, for the settings hint. */
+  readonly archiveBytes: number
+  /** Registry the cached copy came from, or null when not installed. */
+  readonly source: string | null
+  /** ISO timestamp of the install, or null when not installed. */
+  readonly downloadedAt: string | null
 }
 
 /** One exact-target override, as normalized by `readConfig`. */

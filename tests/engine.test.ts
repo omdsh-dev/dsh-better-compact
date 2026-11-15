@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rm, readFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
@@ -8,7 +8,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { GOAL_SECTIONS, HANDOFF_SECTIONS, HANDOFF_TITLE } from '../src/prompts.ts'
 import { SUMMARY_IMAGE_CAPTION } from '../src/shared/contract.ts'
-import { renderSummaryImages } from '../src/summary-image.ts'
+import { prepareCorruptTestHome, prepareEmptyTestHome, prepareTestFontHome } from './helpers/test-font.ts'
 import { readConfig } from '../src/config.ts'
 import { continuationOutcome, lastBudgetFallback, resetLiveRegistry } from '../src/live.ts'
 import { projectLastCompaction } from '../src/inspect.ts'
@@ -66,9 +66,18 @@ interface FakeAgent {
   options: { provider?: string; model?: string }
   inbox: { nextTurn: unknown[]; nextStep: unknown[] }
   session: Record<string, unknown>
+  /** Agent-owned model selection: the destination model for the next step. */
+  model?: { current(): { provider: string; model: string } | undefined }
   followup?: (message: { source: { kind: string }; content: { text?: string }[] }) => void
 
 }
+
+// The renderer draws with the fixed face, so the engine's requireFontPath()
+// resolves a staged copy in a throwaway home instead of the machine's fonts.
+const testFontHome = await prepareTestFontHome()
+after(async () => {
+  await testFontHome.dispose()
+})
 
 /** One agent as the engine's hooks see it. */
 const asAgent = (value: FakeAgent): SummarizeAgent => value as unknown as SummarizeAgent
@@ -705,20 +714,6 @@ function fakeAttachments(): { saved: SavedImage[][]; service: object } {
   }
 }
 
-/**
- * Whether this machine can rasterize (a loaded native canvas plus a CJK face).
- * The wiring below is asserted against the real renderer where it can run, and
- * skipped with the reason where it cannot, instead of asserting a mock.
- */
-let rendererProbe: Promise<string | false> | undefined
-function rendererSkipReason(): Promise<string | false> {
-  rendererProbe ??= renderSummaryImages({ text: 'probe', title: 'probe' }).then(
-    () => false as const,
-    (error: unknown) => 'summary renderer unavailable here: ' + String(error),
-  )
-  return rendererProbe
-}
-
 /** The image blocks of one summary, in order. */
 function imageBlocks(blocks: readonly ContentBlock[]): Extract<ContentBlock, { type: 'image' }>[] {
   return blocks.filter((block): block is Extract<ContentBlock, { type: 'image' }> => block.type === 'image')
@@ -814,12 +809,7 @@ test('summaryImage without an attachments service fails closed', async () => {
   }
 })
 
-test('summaryImage replaces the text checkpoint with the caption plus one block per page', async (t) => {
-  const skip = await rendererSkipReason()
-  if (skip !== false) {
-    t.skip(skip)
-    return
-  }
+test('summaryImage replaces the text checkpoint with the caption plus one block per page', async () => {
   resetLiveRegistry()
   const attachments = fakeAttachments()
   // An undisclosed modality list stays fail-open: the checkpoint is attempted.
@@ -883,3 +873,190 @@ test('summaryImage is not applied to handoff checkpoints', async () => {
     await dispose()
   }
 })
+
+/** Image-capable model stub for the fail-closed cases. */
+function imageLlm(): object {
+  return {
+    resolveModelInfo: async () => ({
+      provider: 'p',
+      id: 'm',
+      name: 'm',
+      context: { contextWindow: 2000 },
+      inputModalities: ['text', 'image'],
+    }),
+    stream: () => streamOf(goalBody())(),
+  }
+}
+
+/** A fake agent whose previous request used a different model. */
+function agentSwitchingFrom(previousModel: string, next: { provider: string; model: string }): FakeAgent {
+  const agent = fakeAgent()
+  return {
+    ...agent,
+    session: {
+      ...agent.session,
+      requestHeader: () => ({
+        config: { provider: 'p', model: previousModel, maxTokens: 10 },
+        tools: [],
+      }),
+    },
+    model: { current: () => next },
+  }
+}
+
+test('summaryImage validates the next step model, not the model being switched away from', async () => {
+  resetLiveRegistry()
+  const attachments = fakeAttachments()
+  const resolved: string[] = []
+  const llm = {
+    resolveModelInfo: async (_provider: string, model: string) => {
+      resolved.push(model)
+      return {
+        provider: 'p',
+        id: model,
+        name: model,
+        context: { contextWindow: 2000 },
+        inputModalities: model === 'old-vision' ? ['text', 'image'] : ['text'],
+      }
+    },
+    stream: () => streamOf(goalBody())(),
+  }
+  const switched = agentSwitchingFrom('old-vision', { provider: 'p', model: 'new-text-only' })
+  const { engine, dispose } = await makeEngine(normalized({ mode: 'goal', summaryImage: true }), {
+    llm,
+    extra: { agents: { list: () => [] }, attachments: attachments.service },
+  })
+  try {
+    await assert.rejects(
+      () => engine.summarize(asInput({ messages: [] }), asAgent(switched)),
+      (error: unknown) => {
+        const failure = error as { code?: string; message?: string }
+        assert.equal(failure.code, 'BETTER_COMPACT_IMAGE')
+        assert.match(failure.message ?? '', /new-text-only/)
+        return true
+      },
+    )
+    // The summary route still resolves the previous/current route; the
+    // capability check must add the destination model, not the old one.
+    assert.equal(resolved.at(-1), 'new-text-only', 'the capability check must resolve the destination model')
+    assert.equal(attachments.saved.length, 0, 'a text-only destination must not store rendered pages')
+  } finally {
+    await dispose()
+  }
+})
+
+test('summaryImage accepts a switch to a vision model even though the last request was text-only', async () => {
+  resetLiveRegistry()
+  const attachments = fakeAttachments()
+  const resolved: string[] = []
+  const llm = {
+    resolveModelInfo: async (_provider: string, model: string) => {
+      resolved.push(model)
+      return {
+        provider: 'p',
+        id: model,
+        name: model,
+        context: { contextWindow: 2000 },
+        inputModalities: model === 'new-vision' ? ['text', 'image'] : ['text'],
+      }
+    },
+    stream: () => streamOf(goalBody())(),
+  }
+  const switched = agentSwitchingFrom('old-text', { provider: 'p', model: 'new-vision' })
+  const { engine, dispose } = await makeEngine(normalized({ mode: 'goal', summaryImage: true }), {
+    llm,
+    extra: { agents: { list: () => [] }, attachments: attachments.service },
+  })
+  try {
+    const result = await engine.summarize(asInput({ messages: [] }), asAgent(switched))
+    assert.equal(resolved.at(-1), 'new-vision', 'the capability check must resolve the destination model')
+    assert.equal(attachments.saved.length, 1, 'the destination model can read the rendered pages')
+    assert.equal(imageBlocks(result.summary).length, 1)
+  } finally {
+    await dispose()
+  }
+})
+
+test('summaryImage fails closed and names the download when the fixed font is not installed', async () => {
+  resetLiveRegistry()
+  const attachments = fakeAttachments()
+  const empty = await prepareEmptyTestHome()
+  let dispose: (() => Promise<void>) | undefined
+  try {
+    const made = await makeEngine(normalized({ mode: 'goal', summaryImage: true }), {
+      llm: imageLlm(),
+      extra: { agents: { list: () => [] }, attachments: attachments.service },
+    })
+    dispose = made.dispose
+    await assert.rejects(
+      () => made.engine.summarize(asInput({ messages: [] }), asAgent(fakeAgent())),
+      (error: unknown) => {
+        const failure = error as { code?: string; message?: string }
+        assert.equal(failure.code, 'BETTER_COMPACT_IMAGE')
+        assert.match(failure.message ?? '', /Download font|font:fetch/)
+        return true
+      },
+    )
+    assert.equal(attachments.saved.length, 0)
+  } finally {
+    await dispose?.()
+    await empty.dispose()
+  }
+})
+
+test('summaryImage fails closed when the cached font is unusable', async () => {
+  resetLiveRegistry()
+  const attachments = fakeAttachments()
+  const corrupt = await prepareCorruptTestHome()
+  let dispose: (() => Promise<void>) | undefined
+  try {
+    const made = await makeEngine(normalized({ mode: 'goal', summaryImage: true }), {
+      llm: imageLlm(),
+      extra: { agents: { list: () => [] }, attachments: attachments.service },
+    })
+    dispose = made.dispose
+    await assert.rejects(
+      () => made.engine.summarize(asInput({ messages: [] }), asAgent(fakeAgent())),
+      (error: unknown) => {
+        const failure = error as { code?: string; message?: string }
+        assert.equal(failure.code, 'BETTER_COMPACT_IMAGE')
+        assert.match(failure.message ?? '', /fixed checkpoint font/)
+        return true
+      },
+    )
+    assert.equal(attachments.saved.length, 0)
+  } finally {
+    await dispose?.()
+    await corrupt.dispose()
+  }
+})
+
+test('summaryImage fails closed when the attachment store rejects the pages', async () => {
+  resetLiveRegistry()
+  const llm = imageLlm()
+  const { engine, dispose } = await makeEngine(normalized({ mode: 'goal', summaryImage: true }), {
+    llm,
+    extra: {
+      agents: { list: () => [] },
+      attachments: {
+        saveImages: async () => {
+          throw new Error('attachment store is full')
+        },
+      },
+    },
+  })
+  try {
+    await assert.rejects(
+      () => engine.summarize(asInput({ messages: [] }), asAgent(fakeAgent())),
+      (error: unknown) => {
+        const failure = error as { code?: string; message?: string }
+        assert.equal(failure.code, 'BETTER_COMPACT_IMAGE')
+        assert.match(failure.message ?? '', /could not store/)
+        return true
+      },
+    )
+  } finally {
+    await dispose()
+  }
+})
+

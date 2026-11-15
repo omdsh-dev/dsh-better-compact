@@ -10,6 +10,10 @@
  * Usage:
  *   node scripts/summary-image-probe.mjs                 # renderer default page cap
  *   node scripts/summary-image-probe.mjs --max-pages 1   # force the omitted-lines marker
+ *   node scripts/summary-image-probe.mjs --font /path/to/font.otf
+ *
+ * Without --font it uses the installed fixed face (the one the settings page
+ * downloads); install it first with `npm run font:fetch`.
  *
  * Node runs the TypeScript source directly through its own type stripping. If
  * this Node build cannot import `.ts` files, run it through the repo's loader:
@@ -38,6 +42,8 @@ if (maxPagesArg !== undefined && !Number.isFinite(maxPages)) {
 }
 /** `--long` appends filler sections until even the compact layout runs out of pages. */
 const long = args.includes('--long')
+const fontIndex = args.indexOf('--font')
+const fontArg = fontIndex >= 0 ? args[fontIndex + 1] : undefined
 
 /** A checkpoint-shaped sample: CJK, Latin, a list, and one long unwrapped line. */
 const SAMPLE_TEXT = [
@@ -48,11 +54,11 @@ const SAMPLE_TEXT = [
   '- 选项 summaryImage 默认关闭，仅在 goal / custom 模式下生效，handoff 与 native 忽略它。',
   '- 渲染器只做像素，不做业务判断：分页、页数上限、省略标注都在渲染器内部完成。',
   '- 失败一律抛 LlmError(code=BETTER_COMPACT_IMAGE)，让压缩失败，而不是交出一份看不见的检查点。',
-  '- Renderer stays pure: no module cache, no font registered between calls, no disk writes.',
+  '- The renderer draws with the pinned Noto Sans SC face only; a host without it fails closed instead of falling back to a system font.',
   '',
   '## Open questions',
   '- 页数上限 SUMMARY_IMAGE_MAX_PAGES 是否随宿主像素预算变化？',
-  '- 没有 CJK 字体的机器上，是否值得降级成英文提示而不是直接失败？',
+  '- 字体缓存在 $DSH_HOME/cache/better-compact/fonts；离线时压缩失败并提示下载。',
   '',
   '## Continuation state',
   '- 会话 a1b2c3d4，模式 goal，阈值 0.72，保留比例 0.16。',
@@ -87,12 +93,36 @@ async function loadRenderer() {
   )
 }
 
+/** Resolve the fixed face: explicit --font, or the installed cache entry. */
+async function loadFontPath(explicit) {
+  if (explicit !== undefined) return resolve(explicit)
+  const candidates = [
+    join(root, 'src', 'font.ts'),
+    join(root, 'lib', 'font.js'),
+  ]
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    try {
+      const module = await import(pathToFileURL(candidate).href)
+      if (typeof module.requireFontPath === 'function') return await module.requireFontPath()
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      console.error('probe: could not resolve the fixed font via ' + candidate + ': ' + reason)
+    }
+  }
+  throw new Error('no installed fixed font found; run `npm run font:fetch` (or download it in Better Compact settings)')
+}
+
 const { module, from } = await loadRenderer()
 const title = 'better-compact goal checkpoint · probe'
+const fontPath = await loadFontPath(fontArg).catch((error) => {
+  console.error('probe: ' + error.message)
+  process.exit(1)
+})
 
 const pages = await module.renderSummaryImages(
   { text: SAMPLE_TEXT, title },
-  ...(maxPages === undefined ? [] : [maxPages]),
+  { fontPath, ...(maxPages === undefined ? {} : { maxPages }) },
 )
 
 const outDir = await mkdtemp(join(tmpdir(), 'bc-summary-image-'))
@@ -105,6 +135,7 @@ for (const [index, page] of pages.entries()) {
 
 console.log('renderer: ' + from)
 console.log('max pages: ' + (maxPages === undefined ? 'renderer default' : String(maxPages)))
+console.log('font: ' + fontPath)
 console.log('sample: ' + (long ? 'long (filler sections appended)' : 'default'))
 console.log('sample: ' + SAMPLE_TEXT.length + ' chars, ' + SAMPLE_TEXT.split('\n').length + ' source lines')
 console.log('output: ' + outDir)

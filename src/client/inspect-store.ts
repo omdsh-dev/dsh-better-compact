@@ -59,22 +59,20 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-/**
- * GET one read-only JSON endpoint; never sends a write verb.
- * @param path - same-origin pathname, query included.
- * @param signal - abort signal for a superseded request.
- * @returns the parsed JSON object.
- */
-export async function getJson(path: string, signal?: AbortSignal | null): Promise<Record<string, unknown>> {
+/** The fetch implementation this client may use, if any. */
+function httpFetch(): typeof fetch {
   const fetcher = typeof fetch === 'function' ? fetch : undefined
   if (fetcher === undefined) throw new Error('HTTP fetch is unavailable in this client')
-  const response = await fetcher(path, {
-    method: 'GET',
-    headers: { accept: 'application/json' },
-    credentials: 'same-origin',
-    cache: 'no-store',
-    ...(signal === undefined || signal === null ? {} : { signal }),
-  })
+  return fetcher
+}
+
+/**
+ * Read one JSON response and map a failure to an actionable message.
+ * @param response - response to read.
+ * @returns the parsed JSON object.
+ * @throws Error carrying the server message, or the HTTP status.
+ */
+async function readJson(response: Response): Promise<Record<string, unknown>> {
   let payload: unknown
   try {
     payload = await response.json()
@@ -89,9 +87,53 @@ export async function getJson(path: string, signal?: AbortSignal | null): Promis
     throw new Error(message)
   }
   if (payload === undefined || payload === null || typeof payload !== 'object') {
-    throw new Error('the read-only response was not JSON')
+    throw new Error('the response was not JSON')
   }
   return payload as Record<string, unknown>
+}
+
+/**
+ * GET one read-only JSON endpoint; never sends a write verb.
+ * @param path - same-origin pathname, query included.
+ * @param signal - abort signal for a superseded request.
+ * @returns the parsed JSON object.
+ */
+export async function getJson(path: string, signal?: AbortSignal | null): Promise<Record<string, unknown>> {
+  const response = await httpFetch()(path, {
+    method: 'GET',
+    headers: { accept: 'application/json' },
+    credentials: 'same-origin',
+    cache: 'no-store',
+    ...(signal === undefined || signal === null ? {} : { signal }),
+  })
+  return readJson(response)
+}
+
+/**
+ * POST one JSON body to a same-origin route.
+ *
+ * The settings page has exactly one write route (the fixed-font install), so
+ * this stays a thin, explicit helper instead of a general request builder.
+ *
+ * @param path - same-origin pathname.
+ * @param body - JSON-serializable body.
+ * @param signal - abort signal for the request.
+ * @returns the parsed JSON object.
+ */
+export async function postJson(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal | null,
+): Promise<Record<string, unknown>> {
+  const response = await httpFetch()(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body: JSON.stringify(body),
+    ...(signal === undefined || signal === null ? {} : { signal }),
+  })
+  return readJson(response)
 }
 
 /**

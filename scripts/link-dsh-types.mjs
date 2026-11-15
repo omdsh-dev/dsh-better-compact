@@ -9,11 +9,13 @@
  *
  *   node scripts/link-dsh-types.mjs [--from <dir>] [--check]
  *
- * `--from` defaults to `$DSH_PACKAGE_ROOT/..` and then to the isolated dev
- * runtime `.dsh-dev/runtime/node_modules/@deepseek-ai`. Idempotent: existing
- * links to the same target are left alone, links to another target are
- * replaced, and real directories (npm-installed packages such as
- * schemastery) are never touched.
+ * The source is, in order: `--from <dir>`, `$DSH_PACKAGE_ROOT` (accepted as the
+ * installed `@deepseek-ai/dsh` package directory, the `@deepseek-ai` peer
+ * directory itself, or a runtime root that contains `node_modules/@deepseek-ai`),
+ * and the isolated dev runtime `.dsh-dev/runtime/node_modules/@deepseek-ai`.
+ * Idempotent: existing links to the same target are left alone, links to
+ * another target are replaced, and real directories (npm-installed packages
+ * such as schemastery) are never touched.
  *
  * `--check` reports what is missing and exits 1 instead of writing; CI uses it
  * to fail fast when the type tree is absent.
@@ -21,6 +23,7 @@
 import { lstat, mkdir, readdir, readlink, rm, symlink } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { typeTreeCandidates } from './lib/dsh-types-source.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -28,15 +31,12 @@ const checkOnly = args.includes('--check')
 const fromIndex = args.indexOf('--from')
 const explicit = fromIndex >= 0 ? args[fromIndex + 1] : undefined
 
-/** Candidate source directories, in priority order. */
-const candidates = [
-  explicit === undefined ? undefined : resolve(explicit),
-  process.env.DSH_PACKAGE_ROOT === undefined
-    ? undefined
-    : resolve(process.env.DSH_PACKAGE_ROOT, '..', '@deepseek-ai'),
-  join(root, '.dsh-dev', 'runtime', 'node_modules', '@deepseek-ai'),
-  join(root, '..', '.dsh-dev', 'runtime', 'node_modules', '@deepseek-ai'),
-].filter((value) => typeof value === 'string')
+/** Candidate source directories, in priority order (see the helper's shapes). */
+const candidates = typeTreeCandidates({
+  explicit,
+  packageRoot: process.env.DSH_PACKAGE_ROOT,
+  root,
+})
 
 /** The first candidate that exists and contains packages. */
 async function pickSource() {

@@ -57,7 +57,9 @@ test('package metadata matches the published contract', () => {
   assert.equal(pkg.license, 'Apache-2.0')
   // Pins the exact licence text that ships inside the tarball.
   const license = readFileSync(at('LICENSE'), 'utf8')
-  assert.equal(createHash('sha256').update(license).digest('hex'), '3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5')
+  // The shipped licence is checked out as LF on every platform (see .gitattributes).
+  // Hashing the working-tree bytes therefore pins the portable text, not a CRLF variant.
+  assert.equal(createHash('sha256').update(license).digest('hex'), 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30')
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.repository.url, 'git+https://github.com/omdsh-dev/dsh-better-compact.git')
   assert.equal(pkg.engines.node, '>=24.9.0')
@@ -281,7 +283,7 @@ test('release workflow rebuilds lib/ and refuses a drifted artifact tree', () =>
 test('documented commands match the package scripts', () => {
   const readme = readFileSync(at('README.md'), 'utf8')
   const development = readFileSync(at('docs', 'DEVELOPMENT.md'), 'utf8')
-  for (const command of ['npm install', 'npm run build', 'npm test', 'npm run typecheck', 'npm run smoke']) {
+  for (const command of ['npm install', 'npm run build', 'npm test', 'npm run typecheck', 'npm run smoke', 'npm run font:fetch']) {
     assert.ok(readme.includes(command) || development.includes(command), `docs never mention \`${command}\``)
   }
   assert.ok(
@@ -324,4 +326,17 @@ test('package files contain no design specs or temp artifacts', () => {
   assert.ok(tracked.includes('cordis.patch.yml'))
   assert.ok(tracked.includes('presets/better-compact.patch.yml'))
   assert.ok(tracked.includes('package.json'))
+})
+
+test('every tracked text file is stored with LF line endings', { skip: existsSync(at('.git')) ? false : 'not a git checkout' }, () => {
+  // A Windows core.autocrlf checkout rewrote LICENSE once and pinned its CRLF
+  // hash, which broke the whole suite on Linux. The index is the source of
+  // truth: .gitattributes normalizes text to LF and binary payloads stay none.
+  assert.match(readFileSync(at('.gitattributes'), 'utf8'), /^\* text=auto eol=lf$/m)
+  const eol = execFileSync('git', ['ls-files', '--eol'], { cwd: rootDir, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean)
+  assert.ok(eol.length > 0)
+  const nonLf = eol.filter((line) => line.startsWith('i/crlf') || line.startsWith('i/mixed'))
+  assert.deepEqual(nonLf, [], 'tracked text files must be LF in the index; normalize them and re-add')
 })

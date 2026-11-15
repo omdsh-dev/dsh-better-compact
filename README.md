@@ -29,7 +29,7 @@
 - native / goal / file-handoff / custom 四种模式（custom 提示词默认填入 goal 指令模板）
 - 预算、阈值、headroom 与保留策略
 - 摘要模型 / 路由 / 输出预留
-- 检查点摘要可渲染成图片附加（[summaryImage](docs/SUMMARY-IMAGE.md)）
+- 检查点摘要可渲染成图片附加（[summaryImage](docs/SUMMARY-IMAGE.md)）：固定 Noto Sans SC 字体，设置页一键从 npm 下载（源站优先，镜像回退），跨设备排版一致
 - 只读诊断与实时过程可视化
 
 <p align="center">
@@ -43,7 +43,7 @@
 
 ```sh
 # 只安装这个插件
-dsh plugin --profile <profile> add dsh-better-compact@0.4.1
+dsh plugin --profile <profile> add dsh-better-compact@0.5.0
 
 # 或安装 Better DSH（会自动带上所有独立插件）
 dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
@@ -85,8 +85,9 @@ dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
 npm install                        # 构建与测试工具链
 node scripts/link-dsh-types.mjs    # 指向已安装的 DSH 运行时，取到 @deepseek-ai/* 类型
 npm run typecheck                  # tsc --noEmit（host 面 + client 面）
-npm test                           # 单元 / 组件测试
+npm test                           # 单元 / 组件测试（图片渲染用仓库内的字体子集夹具）
 npm run build                      # tsdown + tsc 声明，重建 lib/
+npm run font:fetch                 # 预取固定字体（图片检查点的真实字体，约 29 MB）
 npm run smoke                      # 真实 profile 运行时冒烟（需要 rc.2 宿主）
 ```
 

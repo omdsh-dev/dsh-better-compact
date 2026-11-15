@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import { apply, handleModels, INSPECT_PATH, MODELS_PATH } from '../src/index.ts'
+import { apply, handleModels, FONT_PATH, INSPECT_PATH, MODELS_PATH } from '../src/index.ts'
 import { collectModelRoutes } from '../src/models.ts'
 
 /** Test seam: the handler only reads method/url/headers. */
@@ -261,10 +261,11 @@ test('apply registers both read-only routes only when webserver and fence exist'
     [
       { kind: 'exact', path: INSPECT_PATH },
       { kind: 'exact', path: MODELS_PATH },
+      { kind: 'exact', path: FONT_PATH },
     ],
   )
   assert.deepEqual(
     registered.map((route) => typeof route.handler),
-    ['function', 'function'],
+    ['function', 'function', 'function'],
   )
 })
