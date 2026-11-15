@@ -8,8 +8,8 @@ commits, docs, or the npm package.
 ## Status and compatibility
 
 - Package version: `0.3.0`.
-- Verified DSH build: `0.2.2-rc.2`; `engines.dsh` is
-  exactly `0.2.2-rc.2`; other builds are not supported by this release.
+- Verified DSH build: `0.2.2-rc.3`; `engines.dsh` is
+  `>=0.2.2-rc.2 <0.3.0`; rc.2 and rc.3 are supported by this release range.
 - Node.js `>=24.9.0`.
 - Pure ESM, no build step, no generated assets.
 - The visual settings page is implemented as the zero-build browser half and
