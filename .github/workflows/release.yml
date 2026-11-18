@@ -43,7 +43,14 @@ jobs:
       # host once into a scratch prefix, then let the linker point node_modules at
       # that tree — the same script a developer runs against .dsh-dev.
       - name: Install DSH type runtime
-        run: npm install --prefix .dsh-types --no-audit --no-fund @deepseek-ai/dsh@0.2.2-rc.2
+        run: |
+          # Use the host version npm resolved for the peer tree, so the linked
+          # types and node_modules are the same build (a stale hard-coded
+          # version links rc.N types next to rc.M peers and typecheck fails on
+          # cross-copy brand types).
+          host="$(node -p "require('./node_modules/@deepseek-ai/dsh-agent/package.json').version")"
+          npm install --prefix .dsh-types --no-audit --no-fund "@deepseek-ai/dsh@${host}"
+
 
       - name: Link DSH type tree
         run: node scripts/link-dsh-types.mjs --from .dsh-types/node_modules/@deepseek-ai
