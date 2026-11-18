@@ -38,6 +38,32 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # `@deepseek-ai/*` is a runtime peer the host provides, not a dependency of
+      # this plugin, so `npm ci` installs no types for it. Install the matching
+      # host once into a scratch prefix, then let the linker point node_modules at
+      # that tree — the same script a developer runs against .dsh-dev.
+      - name: Install DSH type runtime
+        run: npm install --prefix .dsh-types --no-audit --no-fund @deepseek-ai/dsh@0.2.2-rc.2
+
+      - name: Link DSH type tree
+        run: node scripts/link-dsh-types.mjs --from .dsh-types/node_modules/@deepseek-ai
+
+      # The shipped lib/ is committed. Rebuilding proves the artifacts still
+      # match the sources: a stale lib/ would publish code nobody reviewed.
+      - name: Rebuild lib/
+        run: npm run build
+
+      - name: Fail on artifact drift
+        run: |
+          git add -A -- lib
+          if ! git diff --exit-code --cached -- lib/; then
+            echo '::error::lib/ is out of date; run npm run build and commit the result'
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Test
         run: npm test
 

@@ -1,0 +1,35 @@
+{
+  "//": "Host + tests typecheck face. `@deepseek-ai/*` types resolve through node_modules (run `node scripts/link-dsh-types.mjs` once to point them at an installed DSH runtime; the packages are runtime peers, not npm dependencies). `jsx` is the CLASSIC runtime: tsx (test loader) and the tsdown client bundle both emit React.createElement, and every .tsx imports React explicitly.",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "react",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "./node_modules/@types"
+    ]
+  },
+  "include": [
+    "src",
+    "tests",
+    "tsdown.config.ts",
+    "tsconfig.build.json"
+  ]
+}

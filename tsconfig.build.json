@@ -1,0 +1,17 @@
+{
+  "//": "Declaration build for the published types surface: emits lib/types/*.d.ts mirroring src (rootDir pinned so the layout matches the package exports). tsdown bundles the JS.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "lib/types",
+    "rootDir": "src"
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/client"
+  ]
+}
