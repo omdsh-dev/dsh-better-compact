@@ -101,17 +101,43 @@ interface MountOptions {
   routes?: readonly Record<string, unknown>[]
   payload?: Record<string, unknown>
   language?: 'zh' | 'en'
+  /** Start with the fixed font installed (default) or missing. */
+  fontInstalled?: boolean
+  /** Make the font install route fail with 502. */
+  fontError?: boolean
 }
 
 async function mount(options: MountOptions = {}) {
   const initial = { ...baseValue(), ...options.value }
-  const requests: { path: string; method: string }[] = []
+  const requests: { path: string; method: string; body?: string }[] = []
   let failed = options.fetchError === true
+  let fontInstalled = options.fontInstalled !== false
   const payload = options.payload ?? makePayload()
   const routes = options.routes ?? [{ provider: 'p', model: 'm', efforts: ['low', 'high'], defaultEffort: 'low' }]
-  setGlobal('fetch', async (path: string, init: { method?: string }) => {
-    requests.push({ path, method: init?.method ?? 'GET' })
+  const fontStatus = (): Record<string, unknown> => ({
+    installed: fontInstalled,
+    package: '@betteroffice/fonts-cjk',
+    version: '0.4.2',
+    family: 'Noto Sans SC',
+    bytes: fontInstalled ? 8331336 : null,
+    archiveBytes: 29697320,
+    source: fontInstalled ? 'https://registry.npmjs.org' : null,
+    downloadedAt: fontInstalled ? '2026-01-01T00:00:00.000Z' : null,
+  })
+  setGlobal('fetch', async (path: string, init: { method?: string; body?: string }) => {
+    requests.push({ path, method: init?.method ?? 'GET', ...(init?.body === undefined ? {} : { body: init.body }) })
     if (failed) throw new Error('offline')
+    if (path.indexOf('/font') >= 0) {
+      if (init?.method === 'POST' && options.fontError === true) {
+        return {
+          ok: false,
+          status: 502,
+          json: async () => ({ code: 'FONT_DOWNLOAD_FAILED', message: 'both registries are unreachable' }),
+        }
+      }
+      if (init?.method === 'POST') fontInstalled = true
+      return { ok: true, status: 200, json: async () => fontStatus() }
+    }
     return {
       ok: true,
       status: 200,
@@ -729,3 +755,49 @@ test('summary image switch is disabled whenever the mode cannot attach an image'
     ui.dispose()
   }
 })
+test('the fixed font row reports the installed face and offers a redownload', async () => {
+  const ui = await mount()
+  try {
+    assert.match(ui.text(ui.by('summary-font')), /Noto Sans SC/)
+    const button = ui.by('font-download')
+    assert.equal(ui.text(button), '重新下载')
+    assert.equal((button as HTMLButtonElement).disabled, false)
+    await ui.click('font-download')
+    const post = ui.requests.filter((request) => request.method === 'POST')
+    assert.equal(post.length, 1, 'one click installs once')
+    assert.deepEqual(JSON.parse(post[0]?.body ?? '{}'), { force: true })
+    assert.equal(ui.calls.length, 0, 'a font install must not touch the settings draft')
+  } finally {
+    ui.dispose()
+  }
+})
+
+test('the fixed font row downloads the face when it is missing and reflects the result', async () => {
+  const ui = await mount({ fontInstalled: false })
+  try {
+    assert.match(ui.text(ui.by('font-status')), /未安装/)
+    assert.equal(ui.text(ui.by('font-download')), '下载字体')
+    await ui.click('font-download')
+    const post = ui.requests.filter((request) => request.method === 'POST')
+    assert.equal(post.length, 1)
+    assert.deepEqual(JSON.parse(post[0]?.body ?? '{}'), { force: false })
+    assert.match(ui.text(ui.by('font-status')), /已安装 Noto Sans SC v0\.4\.2/)
+    assert.equal(ui.text(ui.by('font-download')), '重新下载')
+  } finally {
+    ui.dispose()
+  }
+})
+
+test('a failed font download surfaces the route message and stays retryable', async () => {
+  const ui = await mount({ fontInstalled: false, fontError: true })
+  try {
+    await ui.click('font-download')
+    assert.match(ui.text(ui.by('font-error')), /both registries are unreachable/)
+    assert.equal(ui.text(ui.by('font-download')), '下载字体')
+    assert.equal((ui.by('font-download') as HTMLButtonElement).disabled, false)
+    assert.equal(ui.calls.length, 0)
+  } finally {
+    ui.dispose()
+  }
+})
+

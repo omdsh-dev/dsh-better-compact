@@ -6,9 +6,11 @@
  *      Loader) and the `betterCompactConfig` service with both the live value
  *      (`current()`) and the frozen load-time snapshot (`snapshot()`) that the
  *      engine actually holds;
- *   2. the read-only GET `/better-compact/api/inspect` and
- *      GET `/better-compact/api/models` routes on the Host webserver, behind
- *      the Host connection trust fence when that service is present; and
+ *   2. the GET `/better-compact/api/inspect`, GET `/better-compact/api/models`
+ *      and GET|POST `/better-compact/api/font` routes on the Host webserver,
+ *      behind the Host connection trust fence when that service is present.
+ *      The font route is the only one that writes: it installs the pinned
+ *      checkpoint font the operator explicitly asked for; and
  *   3. the browser module package entry (`./client`), mounted by the client
  *      module loader from `dsh.client` in package.json.
  *
@@ -25,9 +27,11 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import { Config, ENTRY_ID, PACKAGE_NAME, deepFreeze, readConfig } from './config.ts'
 import { INSPECT_PATH, InspectError, inspectPlugin } from './inspect.ts'
 import { MODELS_PATH, collectModelRoutes } from './models.ts'
+import { FontInstallError, fontStatus, installFont } from './font.ts'
 import { optionalService } from './shared/services.ts'
 import type { ConnectionService, SettingsService } from './shared/services.ts'
-import type { ConfigSnapshot } from './shared/contract.ts'
+import { FONT_PATH } from './shared/contract.ts'
+import type { ConfigSnapshot, FontStatusPayload } from './shared/contract.ts'
 
 export { Config } from './config.ts'
 export {
@@ -40,6 +44,7 @@ export {
 } from './config.ts'
 export { INSPECT_PATH } from './inspect.ts'
 export { MODELS_PATH } from './models.ts'
+export { FONT_PATH } from './shared/contract.ts'
 
 /** Cordis function-plugin name (also the client module identity). */
 export const name = PACKAGE_NAME
@@ -129,13 +134,14 @@ function parseQuery(req: IncomingMessage): ParsedQuery {
 }
 
 /**
- * Apply the Host trust fence shared by every read-only route.
+ * Apply the Host trust fence shared by every route, read or write.
  *
  * The route is only registered when the Host webserver and `connection` fence
  * both exist; a fence that disappears later must still fail closed. The
  * connection service is the composition's authenticated/trusted Web boundary
- * (Host/Origin fence + browser authentication); this plugin adds no write API,
- * cross-origin allowance, or trust switch of its own.
+ * (Host/Origin fence + browser authentication); this plugin adds no
+ * cross-origin allowance or trust switch of its own, and its one write (the
+ * font install) is a fixed, integrity-checked artifact under that same fence.
  *
  * @param ctx - host context.
  * @param req - request being authorized.
@@ -143,7 +149,7 @@ function parseQuery(req: IncomingMessage): ParsedQuery {
  * @param unavailableCode - wire code used when the fence is absent.
  * @returns true when the request was rejected and a response sent.
  */
-function rejectUntrustedRead(
+function rejectUntrustedRequest(
   ctx: Context,
   req: IncomingMessage,
   res: ServerResponse,
@@ -194,7 +200,7 @@ export async function handleInspect(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  if (rejectUntrustedRead(ctx, req, res, 'INSPECT_UNAVAILABLE')) return
+  if (rejectUntrustedRequest(ctx, req, res, 'INSPECT_UNAVAILABLE')) return
   if (req.method !== 'GET') {
     sendMethodNotAllowed(res, 'GET')
     return
@@ -235,7 +241,7 @@ export async function handleModels(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  if (rejectUntrustedRead(ctx, req, res, 'MODELS_UNAVAILABLE')) return
+  if (rejectUntrustedRequest(ctx, req, res, 'MODELS_UNAVAILABLE')) return
   if (req.method !== 'GET') {
     sendMethodNotAllowed(res, 'GET')
     return
@@ -246,6 +252,154 @@ export async function handleModels(
     sendJson(res, 500, {
       code: 'MODELS_FAILED',
       message: `model route projection failed: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  }
+}
+
+/** Largest JSON body the font route accepts; the only field is `force`. */
+const MAX_FONT_BODY_BYTES = 64 * 1024
+
+/** A rejected request body, carrying the status the route must answer with. */
+class BodyRejection extends Error {
+  /** HTTP status this rejection maps to. */
+  readonly status: 400 | 413
+
+  /**
+   * @param status - HTTP status to answer with.
+   * @param message - actionable detail.
+   */
+  constructor(status: 400 | 413, message: string) {
+    super(message)
+    this.name = 'BodyRejection'
+    this.status = status
+  }
+}
+
+/**
+ * Read one bounded JSON body, or nothing.
+ * @param req - request whose body is read.
+ * @returns the parsed body, or an empty object when the body is empty.
+ * @throws {BodyRejection} 413 past the cap, 400 when the JSON does not parse.
+ */
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
+    total += buffer.byteLength
+    if (total > MAX_FONT_BODY_BYTES) {
+      throw new BodyRejection(413, `the request body exceeds ${MAX_FONT_BODY_BYTES} bytes`)
+    }
+    chunks.push(buffer)
+  }
+  if (total === 0) return {}
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    throw new BodyRejection(400, 'the request body is not valid JSON')
+  }
+}
+
+/** Font asset operations the route performs; injected so tests never go online. */
+export interface FontStore {
+  /** Current installed state. */
+  status(): Promise<FontStatusPayload>
+  /** Install the pinned artifact, optionally redownloading it. */
+  install(options: { readonly force: boolean }): Promise<FontStatusPayload>
+}
+
+/** Production store: the pinned npm artifact and the resolved DSH home. */
+const defaultFontStore: FontStore = {
+  status: () => fontStatus(),
+  install: (options) => installFont({ force: options.force }),
+}
+
+/**
+ * One font request: `GET` reports the installed state, `POST` installs the
+ * pinned face. This is the plugin's only write route; the artifact, its URL,
+ * its integrity and its destination are all fixed here, and the request body
+ * can only ask for a redownload.
+ *
+ * Exported as a test seam for the fence, method, media-type and body branches;
+ * production only reaches it through the registered GET|POST route.
+ *
+ * @param ctx - host context.
+ * @param store - font operations, injected in tests.
+ * @param req - incoming request.
+ * @param res - response owning the reply.
+ */
+export async function handleFont(
+  ctx: Context,
+  store: FontStore,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (rejectUntrustedRequest(ctx, req, res, 'FONT_UNAVAILABLE')) return
+  if (req.method === 'GET') {
+    try {
+      sendJson(res, 200, await store.status())
+    } catch (error) {
+      sendJson(res, 500, {
+        code: 'FONT_FAILED',
+        message: `font status failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+    return
+  }
+  if (req.method !== 'POST') {
+    sendMethodNotAllowed(res, 'GET, POST')
+    return
+  }
+  const mediaType = String(req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') {
+    sendJson(res, 415, {
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'the font install route accepts application/json only',
+    })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    if (error instanceof BodyRejection) {
+      sendJson(res, error.status, {
+        code: error.status === 413 ? 'BODY_TOO_LARGE' : 'INVALID_BODY',
+        message: error.message,
+      })
+      return
+    }
+    sendJson(res, 400, {
+      code: 'INVALID_BODY',
+      message: `the request body could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    })
+    return
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    sendJson(res, 400, { code: 'INVALID_BODY', message: 'the request body must be a JSON object' })
+    return
+  }
+  const record = body as Record<string, unknown>
+  const unknown = Object.keys(record).filter((key) => key !== 'force')
+  if (unknown.length > 0) {
+    sendJson(res, 400, { code: 'INVALID_BODY', message: `unknown field(s): ${unknown.join(', ')}; only "force" is accepted` })
+    return
+  }
+  const force = record.force
+  if (force !== undefined && typeof force !== 'boolean') {
+    sendJson(res, 400, { code: 'INVALID_BODY', message: '"force" must be a boolean' })
+    return
+  }
+  try {
+    sendJson(res, 200, await store.install({ force: force === true }))
+  } catch (error) {
+    if (error instanceof FontInstallError) {
+      sendJson(res, 502, { code: error.code, message: error.message })
+      return
+    }
+    sendJson(res, 500, {
+      code: 'FONT_FAILED',
+      message: `font install failed: ${error instanceof Error ? error.message : String(error)}`,
     })
   }
 }
@@ -308,6 +462,15 @@ export function apply(ctx: Context, config: unknown = {}): void {
           handler: (req, res) => handleModels(inner, req, res),
         }),
       `dsh-better-compact: GET ${MODELS_PATH}`,
+    )
+    inner.effect(
+      () =>
+        inner.webServer.register({
+          kind: 'exact',
+          path: FONT_PATH,
+          handler: (req, res) => handleFont(inner, defaultFontStore, req, res),
+        }),
+      `dsh-better-compact: GET|POST ${FONT_PATH}`,
     )
   })
 }

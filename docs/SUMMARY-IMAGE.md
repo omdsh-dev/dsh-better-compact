@@ -51,7 +51,7 @@
 - 换行：Latin 词不拆断，CJK 与 emoji 等全宽字符可在任意处折行；`\t` 展开成 4 空格。
 - 编码：**不用 canvas 的 `toBuffer('image/png')`**，而是自写 8-bit 灰阶 PNG（`node:zlib` `deflateSync` level 9 + 自算 CRC32）。页面本身只用灰阶，灰阶无损且体积远小于 Skia 输出的未过滤 RGBA。有效性由单元测试用 `loadImage` 解码往返验证。
 - 硬预算（测试守住）：单页 ≤ 450 KiB、合计 ≤ 900 KiB、合计像素 ≤ 3,932,160（上游请求预算 2048² = 4,194,304 与 1 MiB 字节目标之下留余量）。
-- 字体：正文 `monospace` 优先，CJK 兜底族按 `Microsoft YaHei` → `Noto Sans SC` → `Noto Sans CJK SC` → `PingFang SC` → `SimHei` → `SimSun` 探测；全部探不到时在 Windows 注册 `C:\Windows\Fonts\msyh.ttc`。
+- 字体：**固定 Noto Sans SC Regular**（`@betteroffice/fonts-cjk@0.4.2` 的 `assets/NotoSansSC-Regular.otf`，8.0 MB，OFL-1.1），不再探测系统字体。设置页「下载字体」从 npm 源站（`registry.npmjs.org`）下载，失败自动回退 `registry.npmmirror.com`，缓存到 `$DSH_HOME/cache/better-compact/fonts`。同一份字形在所有平台按同一度量排版，页面宽高与换行因此可复现。
 - 渲染依赖 `@napi-rs/canvas`（dependencies，各平台预编译原生包）。它只在真正渲染时惰性 `import()`：从不开启 `summaryImage` 的宿主不加载原生模块，打包产物里也保持 external 说明符。
 
 ## 失败语义（fail-closed）
@@ -59,23 +59,35 @@
 开启后任何一环不成立都**抛 `LlmError`，`code = BETTER_COMPACT_IMAGE`，让这次压缩失败**，绝不静默退回文本检查点。四种情况：
 
 1. 宿主的 `attachments` 服务缺失。
-2. 渲染失败：`@napi-rs/canvas` 加载失败，或找不到任何 CJK 字体（宁可失败也不出豆腐块）。
+2. 渲染失败：`@napi-rs/canvas` 加载失败、固定字体**未安装**或缓存文件不可用（宁可失败也不退回系统字体——那会让不同设备画出不同页面）。
 3. `saveImages()` 存图失败。
 4. 会话当前模型**明确声明**不接受 image 输入（`inputModalities` 存在且不含 `image`）。
 
 两条只警告、不失败：
 
 - 模型图像能力**未知**（`inputModalities` 未声明）→ 记警告后照常附加。未知不等于不支持，为此中止压缩更糟。
-- 合计像素超过上游 2048² 预算 → 记警告。adapter 可能把图片 offload 成占位文本，那时丢的是整个检查点。
+- 合计像素超过 3,932,160（2048² 预算之内留的余量，`REQUEST_IMAGE_PIXEL_BUDGET`）→ 记警告。adapter 可能把图片 offload 成占位文本，那时丢的是整个检查点；当前两页版式远低于该阈值，这条是给未来版式变动的护栏。
+
+模型能力这一条按**下一步**的模型判定（`agent.model.current()`），不是上一次请求头：模型切换那一轮宿主要先压缩、再落新 header，读旧 header 会拿「即将离开的模型」做判断。
 
 排查入口：压缩事件 `compaction/end.error` 的 `code`/`message`；宿主日志前缀 `better-compact:`（页数、字节数、总像素都在里面）。
+
+## 字体资产（固定字体）
+
+检查点图片的可比性来自**同一份字体文件**，而不是各机器上「长得差不多」的系统字体；因此渲染链路只接受这一份钉住的资产，并且是 fail-closed 的。
+
+- 来源：`@betteroffice/fonts-cjk@0.4.2`（OFL-1.1）里的 `package/assets/NotoSansSC-Regular.otf`；字体 8,333,136 B，sha256 `faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9`；tarball 29,697,320 B，sha512 `7emT0WTfmk7hNovU9CyjSDoLo8kNp7RnqICYJ1WT8KgIlPDhfvpVZIBlk258PTbIwe1UTW2lYPTrk5veglawIQ==`（npm 源站与 npmmirror 字节一致）。
+- 安装：设置页「下载字体」→ `POST /better-compact/api/font`。插件下载并校验 tarball 完整性，解包后再次校验字体哈希，然后原子写入缓存；已安装时点击即「重新下载」（`{`"force"`:true}`）。
+- 缓存：`$DSH_HOME/cache/better-compact/fonts/noto-sans-sc.otf` 与同目录 `font.json`（版本、哈希、来源、时间）。缓存被截断、损坏或版本不符时按「未安装」处理，重新下载即可。
+- 只存 8 MB 字体，不存 29 MB tarball；下载失败会把两个 registry 各自的失败原因一起报出来。
+- 没有网络或没有安装字体时，`summaryImage` 的压缩会失败并提示先去下载——这是刻意的：静默退回系统字体等于放弃跨设备一致性。
 
 ## 成本与限制
 
 - **每轮重放都重新付费**：检查点每轮请求都会重放，图片每轮重新计视觉 token（单页约 800–1600），比同长度文本摘要贵。只有在「让检查点肉眼可读」确实值得时才开。
 - **别指望它省 token**：上游的 shrink check 只按 JSON 结构价估算 image 块，不会真的按图片内容计费，因此图片检查点的**真实负载可能高于**文本检查点。开它换来的是可读性，不是更少 token。
 - **页数上限来自上游预算**：请求版本受 2048×2048 像素预算与 1 MiB 字节目标约束，超预算的图片会被 offload 成占位文本——正好是检查点最不能丢的东西，所以页数封在 2，并靠紧凑排版把内容尽量塞进上限。
-- **需要系统 CJK 字体**：容器/精简镜像里通常没有，会直接失败（见上一节第 2 条）。装 `fonts-noto-cjk` 一类字体包即可。
+- **需要先下载固定字体**：一次性 ~29 MB 下载、缓存占 8 MB；入口在设置页，headless/CI 用 `npm run font:fetch`。容器里要保证 `$DSH_HOME` 可写且能访问 npm 源站或镜像。
 - **只改检查点的呈现形式**：阈值、保留、预算与 preview 的计算方式不变，开或关都不会让会话更早/更晚触发压缩。
 
 ## 本地可视化检查

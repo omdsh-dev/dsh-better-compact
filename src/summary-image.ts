@@ -25,18 +25,23 @@
  *
  * `@napi-rs/canvas` is a native module, so it is imported lazily: a host that
  * never renders a summary neither pays for loading it nor fails when the
- * prebuilt binary is missing. Font probing prefers a real CJK family, because a
- * fallback face without CJK coverage renders the summary as empty boxes.
+ * prebuilt binary is missing.
  *
- * The renderer is pure: no module-level cache, no font registered between calls,
- * no disk writes — the same request always produces the same bytes on the same
- * machine, and every page is a fresh canvas.
+ * The face is fixed, not discovered: the caller passes the absolute path of the
+ * pinned Noto Sans SC file downloaded by `src/font.ts`. Relying on system
+ * fonts would make the same checkpoint render differently on Linux, macOS and
+ * Windows, and a CJK-less fallback face would render the summary as empty
+ * boxes. The registered family is memoized per path, and every page is a fresh
+ * canvas, so the same request still produces the same bytes on the same machine.
  */
 
 import { deflateSync } from 'node:zlib'
 import { SUMMARY_IMAGE_MAX_PAGES } from './shared/contract.ts'
 import type { SummaryImagePage, SummaryImageRequest } from './shared/contract.ts'
 import type { SKRSContext2D } from '@napi-rs/canvas'
+
+/** Family name the fixed face is registered under; never a system font. */
+const FONT_ALIAS = 'Better Compact Checkpoint'
 
 /** Fixed page width in pixels; shared by every page so a page break never reflows. */
 const PAGE_WIDTH = 860
@@ -95,23 +100,8 @@ const DEFAULT_LAYOUT: BodyLayout = Object.freeze({ fontSize: 16, lineHeight: 25,
  */
 const COMPACT_LAYOUT: BodyLayout = Object.freeze({ fontSize: 14, lineHeight: 22, maxLines: 48 })
 
-/**
- * CJK families probed in priority order.
- *
- * The first installed one becomes the stack's CJK face; a face is required
- * because the body text of a checkpoint summary is usually CJK.
- */
-const CJK_FAMILIES: readonly string[] = Object.freeze([
-  'Microsoft YaHei',
-  'Noto Sans SC',
-  'Noto Sans CJK SC',
-  'PingFang SC',
-  'SimHei',
-  'SimSun',
-])
-
-/** Windows fallback font file, registered when the family list reports no CJK face. */
-const WINDOWS_CJK_FONT_PATH = 'C:\\Windows\\Fonts\\msyh.ttc'
+/** Font paths already registered in this process, by absolute path. */
+const registeredFonts = new Map<string, string>()
 
 /** The lazily imported `@napi-rs/canvas` module namespace. */
 type CanvasApi = typeof import('@napi-rs/canvas')
@@ -145,40 +135,57 @@ async function loadCanvas(): Promise<CanvasApi> {
 }
 
 /**
- * Resolve a CJK-capable font family for the body and header.
+ * Register the fixed checkpoint face and return its family name.
+ *
+ * The face is not probed on the host: an installed path must be supplied, and a
+ * missing or unreadable file is an error rather than a silent system fallback.
+ * Registration is memoized per path because a process renders many checkpoints
+ * with the same file.
+ *
  * @param api - the loaded canvas module.
+ * @param fontPath - absolute path of the installed fixed face.
  * @returns the family name to place in the font stack.
- * @throws Error when no CJK font can be found at all.
+ * @throws Error when the file cannot be registered as a font.
  */
-async function resolveCjkFamily(api: CanvasApi): Promise<string> {
-  const installed = new Set(api.GlobalFonts.families.map((entry) => entry.family))
-  const detected = CJK_FAMILIES.find((family) => installed.has(family))
-  if (detected !== undefined) return detected
-
-  const { existsSync } = await import('node:fs')
-  if (existsSync(WINDOWS_CJK_FONT_PATH)) {
-    try {
-      const key = api.GlobalFonts.registerFromPath(WINDOWS_CJK_FONT_PATH)
-      if (key !== null) return 'Microsoft YaHei'
-    } catch {
-      // A corrupt or unreadable font file just means this fallback is unavailable.
-    }
+async function resolveFixedFont(api: CanvasApi, fontPath: string): Promise<string> {
+  if (registeredFonts.has(fontPath)) return registeredFonts.get(fontPath) as string
+  let key: unknown
+  try {
+    key = api.GlobalFonts.registerFromPath(fontPath, FONT_ALIAS)
+  } catch (error) {
+    throw new Error(
+      'dsh-better-compact: could not load the fixed checkpoint font at ' + fontPath + ': ' + messageOf(error) +
+        '. Re-download it from Better Compact settings.',
+      { cause: error },
+    )
   }
-
-  throw new Error(
-    'dsh-better-compact: no CJK font is available, so the checkpoint summary image would render as empty boxes. Install one of: ' +
-      CJK_FAMILIES.join(', '),
-  )
+  if (key === null || key === undefined) {
+    throw new Error(
+      'dsh-better-compact: the fixed checkpoint font at ' + fontPath +
+        ' is not a usable font file. Re-download it from Better Compact settings.',
+    )
+  }
+  registeredFonts.set(fontPath, FONT_ALIAS)
+  return FONT_ALIAS
 }
 
 /**
  * Build the CSS font shorthand used for every text run.
- * @param family - resolved CJK family, kept as the fallback after monospace.
+ * @param family - the registered fixed family.
  * @param size - font size in pixels.
  * @returns a canvas `font` value.
  */
 function fontStack(family: string, size: number): string {
-  return `${size}px monospace, "${family}", sans-serif`
+  return `${size}px "${family}", sans-serif`
+}
+
+/**
+ * One-line error text for messages.
+ * @param error - thrown value.
+ * @returns its message, or its string form.
+ */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -506,6 +513,14 @@ function planRequest(
   return planPages(lines, maxPages, layout.maxLines)
 }
 
+/** Required render options: the fixed face plus an optional page cap. */
+export interface SummaryImageRenderOptions {
+  /** Absolute path of the installed fixed font file. */
+  readonly fontPath: string
+  /** Hard page cap; defaults to `SUMMARY_IMAGE_MAX_PAGES`. */
+  readonly maxPages?: number
+}
+
 /**
  * Render a checkpoint summary as PNG page image(s).
  *
@@ -515,17 +530,18 @@ function planRequest(
  * retry is dropped with an explicit omission marker on the last page, so the
  * caller never receives an unbounded image list and nothing disappears silently.
  * @param request - the checkpoint text and its header line.
- * @param maxPages - hard page cap; defaults to `SUMMARY_IMAGE_MAX_PAGES`.
+ * @param options - the fixed font path and the hard page cap.
  * @returns one page per chunk of body text, in order; always at least one page.
- * @throws Error when `@napi-rs/canvas` cannot load or no CJK font is available.
+ * @throws Error when `@napi-rs/canvas` cannot load or the fixed font is unusable.
  */
 export async function renderSummaryImages(
   request: SummaryImageRequest,
-  maxPages: number = SUMMARY_IMAGE_MAX_PAGES,
+  options: SummaryImageRenderOptions,
 ): Promise<readonly SummaryImagePage[]> {
+  const maxPages = options.maxPages ?? SUMMARY_IMAGE_MAX_PAGES
   const limit = Number.isFinite(maxPages) ? Math.max(1, Math.trunc(maxPages)) : SUMMARY_IMAGE_MAX_PAGES
   const api = await loadCanvas()
-  const family = await resolveCjkFamily(api)
+  const family = await resolveFixedFont(api, options.fontPath)
 
   const defaultPlan = planRequest(api, family, request.text, limit, DEFAULT_LAYOUT)
   const plan = defaultPlan.totalPages > limit ? planRequest(api, family, request.text, limit, COMPACT_LAYOUT) : defaultPlan

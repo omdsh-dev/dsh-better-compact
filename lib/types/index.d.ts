@@ -6,9 +6,11 @@
  *      Loader) and the `betterCompactConfig` service with both the live value
  *      (`current()`) and the frozen load-time snapshot (`snapshot()`) that the
  *      engine actually holds;
- *   2. the read-only GET `/better-compact/api/inspect` and
- *      GET `/better-compact/api/models` routes on the Host webserver, behind
- *      the Host connection trust fence when that service is present; and
+ *   2. the GET `/better-compact/api/inspect`, GET `/better-compact/api/models`
+ *      and GET|POST `/better-compact/api/font` routes on the Host webserver,
+ *      behind the Host connection trust fence when that service is present.
+ *      The font route is the only one that writes: it installs the pinned
+ *      checkpoint font the operator explicitly asked for; and
  *   3. the browser module package entry (`./client`), mounted by the client
  *      module loader from `dsh.client` in package.json.
  *
@@ -17,11 +19,12 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
-import type { ConfigSnapshot } from './shared/contract.ts';
+import type { ConfigSnapshot, FontStatusPayload } from './shared/contract.ts';
 export { Config } from './config.ts';
 export { APOLLO_LEGACY_ROW_CONFIG_KEY, APOLLO_ROW_CONFIG_KEY, ENGINE_ENTRY_ID, MODES, ROW_CONFIG_KEY, ROW_CONFIG_KEYS, } from './config.ts';
 export { INSPECT_PATH } from './inspect.ts';
 export { MODELS_PATH } from './models.ts';
+export { FONT_PATH } from './shared/contract.ts';
 /** Cordis function-plugin name (also the client module identity). */
 export declare const name = "dsh-better-compact";
 /** The `betterCompactConfig` service this row provides. */
@@ -60,6 +63,30 @@ export declare function handleInspect(ctx: Context, companion: BetterCompactConf
  * @param res - response owning the reply.
  */
 export declare function handleModels(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void>;
+/** Font asset operations the route performs; injected so tests never go online. */
+export interface FontStore {
+    /** Current installed state. */
+    status(): Promise<FontStatusPayload>;
+    /** Install the pinned artifact, optionally redownloading it. */
+    install(options: {
+        readonly force: boolean;
+    }): Promise<FontStatusPayload>;
+}
+/**
+ * One font request: `GET` reports the installed state, `POST` installs the
+ * pinned face. This is the plugin's only write route; the artifact, its URL,
+ * its integrity and its destination are all fixed here, and the request body
+ * can only ask for a redownload.
+ *
+ * Exported as a test seam for the fence, method, media-type and body branches;
+ * production only reaches it through the registered GET|POST route.
+ *
+ * @param ctx - host context.
+ * @param store - font operations, injected in tests.
+ * @param req - incoming request.
+ * @param res - response owning the reply.
+ */
+export declare function handleFont(ctx: Context, store: FontStore, req: IncomingMessage, res: ServerResponse): Promise<void>;
 /**
  * Mount the companion row.
  * @param ctx - host context.

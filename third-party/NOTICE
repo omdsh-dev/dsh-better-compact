@@ -11,7 +11,7 @@ The following adapted material is derived from the installed DSH 0.2.2-rc.2
 package `@deepseek-ai/dsh-compaction-basic` (and, for the preset copy,
 `@deepseek-ai/dsh-web-app`):
 
-- `src/budget.js` — the pressure/threshold/retention formulas from
+- `src/budget.ts` — the pressure/threshold/retention formulas from
   `resolveCompactSpec` and the specification/selection rules from
   `resolveTargetPolicy` and `selectCompactableRange`. The DSH build is bundled;
   these functions are not exported from the package, so the formulas are
@@ -19,7 +19,7 @@ package `@deepseek-ai/dsh-compaction-basic` (and, for the preset copy,
   behavior-compatible with the native engine. Changed: TypeScript types were
   dropped, diagnostics were reworded, and the functions take detached plain
   configuration.
-- `src/engine.js` — the shape of the one-shot summarization request (replayed
+- `src/engine.ts` — the shape of the one-shot summarization request (replayed
   prefix, final user instruction, `purpose: 'compaction'`, assembler and
   fail-closed finish mapping) follows `summarizeWithLlm` / `summarizeCompaction`
   so goal and handoff summaries reuse the native warm prefix instead of copying
@@ -32,10 +32,19 @@ package `@deepseek-ai/dsh-compaction-basic` (and, for the preset copy,
   identity/metadata changed. The original copyright and MIT license apply.
 
 The native checkpoint preamble and `<compacted-summary>` framing text are
-reproduced in `src/inspect.js` **only** to price the preview's replacement upper
+reproduced in `src/inspect.ts` **only** to price the preview's replacement upper
 bound (`NATIVE_CHECKPOINT_FRAMING_TOKENS`); native mode itself still calls the
 inherited `summarize()` implementation, so the installed host remains the only
 source of the actual framing written to a checkpoint.
+
+## Noto Sans SC (`@betteroffice/fonts-cjk`, OFL-1.1)
+
+`summaryImage` draws every checkpoint with the Noto Sans SC Regular face. The
+font is **not** redistributed in the npm package: `src/font.ts` downloads the
+pinned `@betteroffice/fonts-cjk@0.4.2` tarball at the operator's request,
+verifies its integrity and caches it under the DSH home. The committed test
+fixture (`tests/fixtures/NotoSansSC-subset.otf`) is a subset of that face and
+ships with its licence text in `tests/fixtures/OFL.txt`.
 
 ## Design references (no source copied)
 

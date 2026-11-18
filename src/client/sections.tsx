@@ -19,6 +19,7 @@ import {
   type PromptToken,
 } from '../shared/contract.ts'
 import { DEFAULT_RETAIN_RATIO, POLICY_NUMBERS, policyDraft, type ConfigDraft, type PolicyDraft } from './draft.ts'
+import { useFontAsset } from './font.ts'
 import { t } from './locales/index.ts'
 import type { MessageKey } from './locales/zh.ts'
 import {
@@ -465,6 +466,7 @@ export function ProcessEditor(props: ProcessEditorProps): React.ReactElement {
               checked={draft.summaryImage} disabled={disabled || !summaryImageApplies}
               onChange={(summaryImage) => props.onDraft({ summaryImage })} />
           </div>
+          <SummaryFontControl />
         </div>
       </Section>
       <Section name="generation" dataBc="generation" title={processText('generationTitle')}
@@ -961,3 +963,53 @@ export function SaveFooter(props: SaveFooterProps): React.ReactElement | null {
     </footer>
   )
 }
+
+/**
+ * Fixed-font control: the installed state plus the one action that installs it.
+ *
+ * It lives next to the summary-image switch because that switch is why the face
+ * exists: with `summaryImage` on, compaction draws the checkpoint with this face
+ * and fails closed until it is installed.
+ * @returns the status line, the action button and any failure.
+ */
+function SummaryFontControl(): React.ReactElement {
+  const font = useFontAsset()
+  const installed = font.status?.installed === true
+  const busy = font.installing
+  return (
+    <div className="dsh-bc-font-row" data-bc="summary-font">
+      <div className="dsh-bc-font-line">
+        <p className="dsh-bc-caption" data-bc="font-status">
+          {font.loading
+            ? t('fontChecking')
+            : installed
+              ? t('fontInstalled', {
+                family: font.status?.family ?? '',
+                version: font.status?.version ?? '',
+                size: megabytes(font.status?.bytes ?? null),
+              })
+              : t('fontMissing')}
+        </p>
+        <button type="button" className="dsh-bc-btn" data-bc="font-download"
+          disabled={busy || font.loading} aria-busy={busy}
+          onClick={() => { void font.install(installed) }}>
+          {busy ? t('fontDownloading') : installed ? t('fontRedownload') : t('fontDownload')}
+        </button>
+      </div>
+      {font.error === null ? null : (
+        <p className="dsh-bc-caption dsh-bc-font-error" role="alert" data-bc="font-error">{font.error}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Format a byte count for the status line.
+ * @param bytes - installed font size, or null.
+ * @returns a one-decimal megabyte figure, or an em dash.
+ */
+function megabytes(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes) || bytes <= 0) return '—'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+

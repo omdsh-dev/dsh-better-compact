@@ -2,8 +2,19 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadImage } from '@napi-rs/canvas'
 import { SUMMARY_IMAGE_MAX_PAGES } from '../src/shared/contract.ts'
-import type { SummaryImagePage } from '../src/shared/contract.ts'
+import type { SummaryImagePage, SummaryImageRequest } from '../src/shared/contract.ts'
+import { TEST_FONT_PATH } from './helpers/test-font.ts'
 import { renderSummaryImages } from '../src/summary-image.ts'
+
+/** 
+ * Render through the committed fixture face. The renderer no longer probes
+ * system fonts, so every case names the fixed face explicitly.
+ * @param request - checkpoint text and header.
+ * @param maxPages - optional page cap.
+ * @returns the rendered pages.
+ */
+const render = async (request: SummaryImageRequest, maxPages?: number) =>
+  renderSummaryImages(request, maxPages === undefined ? { fontPath: TEST_FONT_PATH } : { fontPath: TEST_FONT_PATH, maxPages })
 
 /** PNG signature bytes, as a real encoder always emits them. */
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const
@@ -60,35 +71,35 @@ function assertRequestBudget(pages: readonly SummaryImagePage[]): void {
 }
 
 test('rasterizes a short summary as one PNG page', async () => {
-  const pages = await renderSummaryImages({ text: summaryText(3), title: 'session abc · goal' })
+  const pages = await render({ text: summaryText(3), title: 'session abc · goal' })
   assert.equal(pages.length, 1)
   assertPngPage(pages[0]!, 'compaction-summary-1.png')
 })
 
 test('is deterministic: the same request yields identical bytes', async () => {
   const request = { text: summaryText(5), title: 'session abc · goal' }
-  const [first, second] = await Promise.all([renderSummaryImages(request), renderSummaryImages(request)])
+  const [first, second] = await Promise.all([render(request), render(request)])
   assert.equal(first.length, 1)
   assert.deepEqual(first[0]!.data, second[0]!.data)
 })
 
 test('keeps the width fixed at 860 and lets the height follow the text', async () => {
-  const [short] = await renderSummaryImages({ text: summaryText(1), title: 'session abc · goal' })
-  const [tall] = await renderSummaryImages({ text: summaryText(20), title: 'session abc · goal' })
+  const [short] = await render({ text: summaryText(1), title: 'session abc · goal' })
+  const [tall] = await render({ text: summaryText(20), title: 'session abc · goal' })
   assert.equal(short!.width, EXPECTED_WIDTH)
   assert.equal(tall!.width, EXPECTED_WIDTH)
   assert.equal(tall!.height - short!.height, 19 * DEFAULT_LINE_HEIGHT)
 })
 
 test('still returns one page for empty text', async () => {
-  const pages = await renderSummaryImages({ text: '', title: '' })
+  const pages = await render({ text: '', title: '' })
   assert.equal(pages.length, 1)
   assertPngPage(pages[0]!, 'compaction-summary-1.png')
 })
 
 test('breaks a summary at 40 body lines on the default layout', async () => {
-  const [single] = await renderSummaryImages({ text: summaryText(DEFAULT_MAX_LINES), title: 'session abc · goal' })
-  const split = await renderSummaryImages({ text: summaryText(DEFAULT_MAX_LINES + 1), title: 'session abc · goal' })
+  const [single] = await render({ text: summaryText(DEFAULT_MAX_LINES), title: 'session abc · goal' })
+  const split = await render({ text: summaryText(DEFAULT_MAX_LINES + 1), title: 'session abc · goal' })
   assert.equal(single!.height, DEFAULT_MAX_LINES * DEFAULT_LINE_HEIGHT + PAGE_FURNITURE)
   assert.equal(split.length, 2)
   assert.equal(split[0]!.height, single!.height)
@@ -97,14 +108,14 @@ test('breaks a summary at 40 body lines on the default layout', async () => {
 
 test('numbers page names consecutively and stops at SUMMARY_IMAGE_MAX_PAGES', async () => {
   assert.equal(SUMMARY_IMAGE_MAX_PAGES, 2)
-  const pages = await renderSummaryImages({ text: summaryText(600), title: 'session abc · goal' })
+  const pages = await render({ text: summaryText(600), title: 'session abc · goal' })
   assert.equal(pages.length, SUMMARY_IMAGE_MAX_PAGES)
   pages.forEach((page, index) => assertPngPage(page, `compaction-summary-${index + 1}.png`))
   assertRequestBudget(pages)
 })
 
 test('re-wraps 100 dense CJK lines onto the compact layout to fit the page cap', async () => {
-  const pages = await renderSummaryImages({ text: denseCjkText(100), title: 'session abc · goal · deepseek/chat' })
+  const pages = await render({ text: denseCjkText(100), title: 'session abc · goal · deepseek/chat' })
   assert.equal(pages.length, 2)
   pages.forEach((page, index) => assertPngPage(page, `compaction-summary-${index + 1}.png`))
   assert.equal(
@@ -117,7 +128,7 @@ test('re-wraps 100 dense CJK lines onto the compact layout to fit the page cap',
 })
 
 test('keeps the default layout when the summary already fits the cap', async () => {
-  const pages = await renderSummaryImages({ text: summaryText(80), title: 'session abc · goal' })
+  const pages = await render({ text: summaryText(80), title: 'session abc · goal' })
   assert.equal(pages.length, 2)
   assert.ok(
     pages.every((page) => page.height === DEFAULT_MAX_LINES * DEFAULT_LINE_HEIGHT + PAGE_FURNITURE),
@@ -127,8 +138,8 @@ test('keeps the default layout when the summary already fits the cap', async () 
 
 test('marks how many lines the page cap dropped', async () => {
   const [capped, oneMoreLine] = await Promise.all([
-    renderSummaryImages({ text: summaryText(600), title: 'session abc · goal' }),
-    renderSummaryImages({ text: summaryText(601), title: 'session abc · goal' }),
+    render({ text: summaryText(600), title: 'session abc · goal' }),
+    render({ text: summaryText(601), title: 'session abc · goal' }),
   ])
   assert.equal(capped.length, 2)
   assert.equal(capped[1]!.height, capped[0]!.height, 'the last page stays inside the line cap')
@@ -141,19 +152,19 @@ test('marks how many lines the page cap dropped', async () => {
 })
 
 test('honors an explicit maxPages below the contract cap', async () => {
-  const pages = await renderSummaryImages({ text: summaryText(600), title: 'session abc · goal' }, 1)
+  const pages = await render({ text: summaryText(600), title: 'session abc · goal' }, 1)
   assert.equal(pages.length, 1)
   assertPngPage(pages[0]!, 'compaction-summary-1.png')
 })
 
 test('renders CJK and ASCII-only summaries to different bytes', async () => {
-  const [cjk] = await renderSummaryImages({ text: '继续状态：目标已达成，待办三项。', title: '会话 abc · 目标' })
-  const [ascii] = await renderSummaryImages({ text: 'continuation state: goal done, three todos.', title: 'session abc · goal' })
+  const [cjk] = await render({ text: '继续状态：目标已达成，待办三项。', title: '会话 abc · 目标' })
+  const [ascii] = await render({ text: 'continuation state: goal done, three todos.', title: 'session abc · goal' })
   assert.notDeepEqual(cjk!.data, ascii!.data)
 })
 
 test('encodes pages that a real PNG decoder accepts', async () => {
-  const pages = await renderSummaryImages({ text: denseCjkText(100), title: 'session abc · goal' })
+  const pages = await render({ text: denseCjkText(100), title: 'session abc · goal' })
   for (const page of pages) {
     const decoded = await loadImage(Buffer.from(page.data))
     assert.equal(decoded.width, page.width)

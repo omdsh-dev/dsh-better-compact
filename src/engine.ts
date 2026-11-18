@@ -61,6 +61,7 @@ import type {
   SummaryImageRequest,
 } from './shared/contract.ts'
 import { renderSummaryImages } from './summary-image.ts'
+import { requireFontPath } from './font.ts'
 import { BudgetConfigError, resolveTargetPolicy, routedTarget } from './budget.ts'
 import {
   assertSummaryStructure,
@@ -94,11 +95,13 @@ import type { AgentPresetsService } from './shared/services.ts'
 const EMPTY_CONFIG: z = z.object({})
 
 /**
- * Upstream request image pixel budget (2048×2048). A request carrying more
- * total image pixels than this has its images offloaded to placeholder text by
- * the adapter, which would drop the checkpoint content the model needs.
+ * Request image pixel budget kept under the adapter's 2048×2048 cap. A request
+ * carrying more total image pixels than this may have its images offloaded to
+ * placeholder text by the adapter, which would drop the checkpoint content the
+ * model needs. The renderer's two-page cap stays far below it; this is the
+ * guard for a future layout change, and it matches docs/SUMMARY-IMAGE.md.
  */
-const REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
+const REQUEST_IMAGE_PIXEL_BUDGET = 3_932_160
 
 /**
  * Run one summary-image step, mapping any failure to the fail-closed code. A
@@ -757,8 +760,12 @@ export class BetterCompactEngine extends BasicCompactionEngine {
       text,
       title: `better-compact ${this.mode} checkpoint · ${agent.session.id}`,
     }
-    const pages = await imageStep('could not render the summary image checkpoint', () =>
-      renderSummaryImages(request))
+    const pages = await imageStep('could not render the summary image checkpoint', async () => {
+      // The face is pinned, not discovered: rendering fails closed until the
+      // operator installs the fixed font, so every device draws the same page.
+      const fontPath = await requireFontPath()
+      return renderSummaryImages(request, { fontPath })
+    })
     const refs = await imageStep('could not store the rendered summary image checkpoint', () =>
       attachments.saveImages(pages.map((page) => ({
         data: page.data,
@@ -788,15 +795,25 @@ export class BetterCompactEngine extends BasicCompactionEngine {
    * carries them; an adapter that refuses image input fails that request after
    * the checkpoint was already committed, which leaves the session unable to
    * continue. The check therefore uses the conversation target, not the summary
-   * target. An undisclosed modality list stays fail-open: absence means unknown,
-   * and aborting compaction over an unknown capability would be worse than the
-   * rendering attempt itself.
+   * target — and it asks the agent for the *next step's* choice
+   * (`agent.model.current()`), not the last durable request header. During a
+   * model switch the host compacts against a proposed header before that header
+   * is recorded, so the header still names the model being left; validating it
+   * would commit an image-only checkpoint for a text-only destination.
+   * `current()` already falls back from recorded choices to the last request and
+   * then the agent's live options, so the older lookups only cover a host that
+   * exposes no `model` accessor. An undisclosed modality list stays fail-open:
+   * absence means unknown, and aborting compaction over an unknown capability
+   * would be worse than the rendering attempt itself.
    * @param agent - owner of the compacted session.
    * @param signal - cancellation forwarded to model resolution.
    * @throws {LlmError} with code BETTER_COMPACT_IMAGE when the model is text-only.
    */
   async assertConversationAcceptsImages(agent: Agent, signal?: AbortSignal): Promise<void> {
-    const conversationTarget = routedTarget(agent.session) ?? routeFromAgentOptions(agent)
+    const selection = agent.model?.current?.()
+    const conversationTarget = selection !== undefined
+      ? { provider: selection.provider, model: selection.model }
+      : routedTarget(agent.session) ?? routeFromAgentOptions(agent)
     if (conversationTarget === undefined) return
     const { provider, model } = conversationTarget
     const info = await this.ctx.llm.resolveModelInfo(provider, model, signal)
