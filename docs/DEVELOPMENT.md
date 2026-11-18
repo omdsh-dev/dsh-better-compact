@@ -8,8 +8,9 @@ commits, docs, or the npm package.
 ## Status and compatibility
 
 - Package version: `0.5.0`.
-- Verified DSH build: `0.2.2-rc.2`; `engines.dsh` is
-  exactly `0.2.2-rc.2`; other builds are not supported by this release.
+- Verified DSH builds: `0.2.2-rc.3` (current) and `0.2.2-rc.2`;
+  `engines.dsh` is `>=0.2.2-rc.2 <0.3.0`, so both rc.2 and rc.3 hosts are
+  supported by this release; other builds are not.
 - Node.js `>=24.9.0`.
 - TypeScript sources under `src/`, prebuilt `lib/` in the repository. The port
   preserved 0.4.1 compaction behaviour and added one capability: `summaryImage`
@@ -32,7 +33,7 @@ commits, docs, or the npm package.
 | --- | --- |
 | [package.json](../package.json) | npm metadata, exports, peers, `dsh.bundle.patch`, `dsh.client`. |
 | [cordis.patch.yml](../cordis.patch.yml) | Standalone composition: disable host `compaction-basic`, insert host companion + host-plane engine rows. |
-| [presets/better-compact.patch.yml](../presets/better-compact.patch.yml) | Selectable Web preset: pinned rc.2 `standard` copy with the compaction group's engine swapped. |
+| [presets/better-compact.patch.yml](../presets/better-compact.patch.yml) | Selectable Web preset: pinned rc.3 `standard` copy (identical in rc.2) with the compaction group's engine swapped. |
 | [tsconfig.json](../tsconfig.json) | Host + test typecheck face (`strict`, `noUncheckedIndexedAccess`, classic JSX). No `paths`/`baseUrl`: `@deepseek-ai/*` types resolve through `node_modules`, linked by `scripts/link-dsh-types.mjs`. |
 | [tsconfig.client.json](../tsconfig.client.json) | Browser-only typecheck face: `src/client` + `src/shared`, no Node types. |
 | [tsconfig.build.json](../tsconfig.build.json) | Declaration build: emits `lib/types/**/*.d.ts` from the host half. |
@@ -284,7 +285,7 @@ cannot. No bundle or build step is involved:
   `window.__ModuleLoader__.load({ id: 'dsh-better-compact', ... })` banner.
   Build before running the suite, or these assertions fail on purpose.
 
-Run with the baseline preset comparison enabled (the isolated rc.2 runtime in
+Run with the baseline preset comparison enabled (the isolated rc.2/rc.3 runtime in
 this repository already has that shape):
 
 ```sh
