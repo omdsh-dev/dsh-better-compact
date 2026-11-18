@@ -29,6 +29,7 @@
  */
 
 import assert from 'node:assert/strict'
+import semver from 'semver'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, writeFile, cp, symlink, rm, stat, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -77,12 +78,11 @@ const home = await mkdtemp(join(tmpdir(), 'dsh-better-compact-smoke-'))
 process.env.DSH_HOME = home
 process.env.DSH_TELEMETRY_DISABLED = '1'
 
-// The supported host is the one `engines.dsh` pins; keep the two in lockstep
-// instead of repeating the version here.
+// The supported host range is `engines.dsh`; keep the two in lockstep instead
+// of repeating a version here. rc.2 and rc.3 are both in range.
 const hostPackage = JSON.parse(await readFile(join(dsh, 'package.json'), 'utf8'))
-assert.equal(
-  hostPackage.version,
-  pkg.engines.dsh,
+assert.ok(
+  semver.satisfies(hostPackage.version, pkg.engines.dsh),
   'smoke requires host ' + pkg.engines.dsh + ' (engines.dsh), found ' + hostPackage.version,
 )
 const appBoot = await import(at('dsh-app-boot/lib/index.js'))

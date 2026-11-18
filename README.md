@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-better-compact"><img src="https://img.shields.io/npm/v/dsh-better-compact.svg" alt="npm 版本"></a>
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/github/license/omdsh-dev/dsh-better-compact?color=blue"></a>
-  <a href="package.json"><img alt="DSH 0.2.2-rc.2" src="https://img.shields.io/badge/DSH-0.2.2--rc.2-4B32C3"></a>
+  <a href="package.json"><img alt="DSH 0.2.2-rc.2 / rc.3" src="https://img.shields.io/badge/DSH-0.2.2--rc.2%20%7C%20rc.3-4B32C3"></a>
   <a href="https://github.com/omdsh-dev/dsh-better-dsh"><img alt="Part of Better DSH" src="https://img.shields.io/badge/part%20of-dsh--better--dsh-2F80B7"></a>
 </p>
 
@@ -46,7 +46,7 @@
 dsh plugin --profile <profile> add dsh-better-compact@0.5.0
 
 # 或安装 Better DSH（会自动带上所有独立插件）
-dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
+dsh plugin --profile <profile> add dsh-better-dsh@0.11.7
 ```
 
 包内直接带预构建的 `lib/`，安装即用，不需要本地构建。
@@ -60,7 +60,7 @@ dsh plugin --profile <profile> add dsh-better-dsh@0.10.0
 | 稳定行 id | `dsh-better-compact + dsh-better-compact-engine` |
 | 入口 / 工具 | 压缩引擎行 · `/better-compact/api/inspect` · 压缩设置页 |
 | 设置 | 模式、auto、阈值 / headroom / 保留、摘要模型、重试、模型规则 |
-| npm 包 | `dsh-better-compact@0.4.1` |
+| npm 包 | `dsh-better-compact@0.5.0` |
 | 仓库 | https://github.com/omdsh-dev/dsh-better-compact |
 
 ## 设置
@@ -88,7 +88,7 @@ npm run typecheck                  # tsc --noEmit（host 面 + client 面）
 npm test                           # 单元 / 组件测试（图片渲染用仓库内的字体子集夹具）
 npm run build                      # tsdown + tsc 声明，重建 lib/
 npm run font:fetch                 # 预取固定字体（图片检查点的真实字体，约 29 MB）
-npm run smoke                      # 真实 profile 运行时冒烟（需要 rc.2 宿主）
+npm run smoke                      # 真实 profile 运行时冒烟（需要 rc.2 / rc.3 宿主）
 ```
 
 以源码形态装进 profile 时用本地路径，改完重建 `lib/` 再重启：
