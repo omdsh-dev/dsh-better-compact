@@ -4,7 +4,7 @@
 # row id and every other plugin, tool, isolation realm, and config value stay
 # identical to the shipped preset so this preset is a drop-in replacement.
 #
-# Copied from @deepseek-ai/dsh-web-app 0.2.2-rc.3 presets/standard.patch.yml (identical in rc.2)
+# Copied from @deepseek-ai/dsh-web-app 0.2.3-alpha.2 presets/standard.patch.yml
 # (MIT, Copyright (c) 2026 DeepSeek; see third-party/NOTICE). The copy is
 # required because a bundle patch cannot address preset-internal rows. This
 # preset is the only standalone-Web way to give a session the better-compact
@@ -137,6 +137,8 @@
             config:
               fetch: true
               searchTimeoutMs: 60000
+          - id: tool-cordis
+            name: '@deepseek-ai/dsh-tool-cordis'
           - id: present
             name: '@deepseek-ai/dsh-tool-present'
           - id: tool-office

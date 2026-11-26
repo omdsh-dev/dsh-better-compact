@@ -33,6 +33,7 @@ import semver from 'semver'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, writeFile, cp, symlink, rm, stat, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -73,7 +74,11 @@ if (!process.env.DSH_PACKAGE_ROOT) {
   throw new Error('Set DSH_PACKAGE_ROOT to the installed @deepseek-ai/dsh package directory')
 }
 const dsh = resolveDshPackage(resolve(process.env.DSH_PACKAGE_ROOT))
-const at = (name) => pathToFileURL(join(dirname(dsh), name)).href
+const hostRequire = createRequire(join(dsh, 'package.json'))
+// npm installs the host's runtime peers under dsh/node_modules; pnpm may hoist
+// them beside dsh. Resolve the real directory instead of assuming one layout.
+const hostPeerRoot = dirname(dirname(hostRequire.resolve('@deepseek-ai/dsh-web-app/package.json')))
+const at = (name) => pathToFileURL(join(hostPeerRoot, name)).href
 const home = await mkdtemp(join(tmpdir(), 'dsh-better-compact-smoke-'))
 process.env.DSH_HOME = home
 process.env.DSH_TELEMETRY_DISABLED = '1'
@@ -89,7 +94,7 @@ const appBoot = await import(at('dsh-app-boot/lib/index.js'))
 const { PROFILE_TEMPLATES } = await import(at('dsh-official-bundles/lib/index.js'))
 const { symbols } = await import(at('cordis/lib/index.js'))
 const { createUserMessage } = await import(at('dsh-llm/lib/index.js'))
-const { runProfile } = await import(at('dsh/lib/profile-boot.js'))
+const { runProfile } = await import(pathToFileURL(join(dsh, 'lib/profile-boot.js')).href)
 
 const profileDir = appBoot.resolveProfileDir('it', home)
 appBoot.initProfile(profileDir, [...PROFILE_TEMPLATES.headless.bundles, 'dsh-better-compact'])
@@ -121,7 +126,7 @@ assert.match(
   /^\s*window\.__ModuleLoader__\.load\(\{\s*id:\s*(['"])dsh-better-compact\1/,
   'lib/client.js must open with the ModuleLoader banner',
 )
-await symlink(dirname(dsh), join(modules, '@deepseek-ai'))
+await symlink(hostPeerRoot, join(modules, '@deepseek-ai'))
 const manifestPath = join(profileDir, 'package.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 manifest.dependencies['dsh-better-compact'] = `file:${pluginDir}`
@@ -130,7 +135,7 @@ await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
 /** Load the shipped standard preset so a real foreign-engine session can be inspected. */
 const standardPresetPatches = appBoot.loadOverlayPatches(
   'better-compact-smoke',
-  join(dirname(dsh), 'dsh-web-app', 'presets', 'standard.patch.yml'),
+  join(hostPeerRoot, 'dsh-web-app', 'presets', 'standard.patch.yml'),
 )
 // Give the foreign native engine a deliberately different pressure threshold.
 // A model switch below that threshold must not be compacted by the host row.
@@ -188,6 +193,14 @@ await writeFile(
             name: '@deepseek-ai/dsh-client-connection',
             config: { trustedHosts: [], cookieMaxAgeDays: 30 },
           },
+          {
+            id: 'authentication-token',
+            name: '@deepseek-ai/dsh-host-authentication-token',
+          },
+          // 0.2.3's standard preset (and the shipped better-compact copy) mounts
+          // tool-cordis; the web composition provides these two host rows.
+          { id: 'cordis-host-runner', name: '@deepseek-ai/dsh-cordis-host-runner' },
+          { id: 'cordis-inspect-providers', name: '@deepseek-ai/dsh-tool-cordis/host' },
           {
             id: 'tool-ask-user',
             name: '@deepseek-ai/dsh-tool-ask-user',
@@ -376,9 +389,13 @@ let inspectorCookie = null
  * HTTP check below runs through the real authentication path.
  */
 async function authenticateInspector(ctx) {
-  const connection = ctx.get('connection')
-  assert.ok(connection, 'the smoke profile must mount the real connection service')
-  const url = new URL(connection.authenticatedUrl(ctx.get('webServer').getOrigin()))
+  // 0.2.3 moved URL minting from the connection service to the token plugin's
+  // `webserver/entry-url` contribution; use the same URL a real `dsh web` prints.
+  const entries = []
+  ctx.emit('webserver/entry-url', ctx.get('webServer').getOrigin(), entries)
+  const entry = entries.find((candidate) => candidate.open) ?? entries[0]
+  assert.ok(entry, 'the authentication row must contribute an entry URL')
+  const url = new URL(entry.url)
   url.pathname = '/connect'
   url.searchParams.set('interactions', 'none')
   const response = await fetch(url, { redirect: 'manual' })

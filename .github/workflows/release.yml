@@ -24,7 +24,7 @@ jobs:
       # Node 24 ships npm >= 11.5.1, the floor for trusted publishing.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.22.3
           registry-url: https://registry.npmjs.org
 
       - name: Check the tag matches package.json
@@ -75,4 +75,4 @@ jobs:
         run: npm test
 
       - name: Publish
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag alpha

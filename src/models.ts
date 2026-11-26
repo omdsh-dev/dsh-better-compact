@@ -30,7 +30,8 @@ interface ContextReader {
 
 /** `subagentModelSelection` face (the host allow-list owner). */
 interface SelectionFace {
-  current?(): unknown
+  /** Routes the live opt-in setting currently authorizes, or undefined when disabled. */
+  allowedRoutes?(): unknown
 }
 
 /** `llm` face: only the opaque per-route capability metadata is read. */
@@ -64,7 +65,7 @@ function service<T>(ctx: ContextReader, name: string): T | undefined {
  * Project the host's allowed model routes with their advertised efforts.
  *
  * Mirrors the small `collectTierRoutes` pattern in `dsh-better-subagent`:
- * `subagentModelSelection.current().allowedModels` is the candidate source and
+ * `subagentModelSelection.allowedRoutes()` is the candidate source and
  * `ctx.llm.resolveModelInfo(provider, model)` supplies the opaque effort ids.
  * A failed per-route capability lookup only empties that route's effort list;
  * it never hides the route or invents an effort.
@@ -73,20 +74,20 @@ function service<T>(ctx: ContextReader, name: string): T | undefined {
  * @returns the read-only models payload.
  */
 export async function collectModelRoutes(ctx: ContextReader): Promise<ModelRoutesPayload> {
-  let selection: unknown
+  let allowed: unknown
   try {
-    selection = service<SelectionFace>(ctx, 'subagentModelSelection')?.current?.()
+    allowed = service<SelectionFace>(ctx, 'subagentModelSelection')?.allowedRoutes?.()
   } catch {
-    selection = undefined
+    allowed = undefined
   }
-  if (!isRecord(selection) || !Array.isArray(selection.allowedModels)) {
+  if (!Array.isArray(allowed)) {
     return { enabled: false, routes: [] }
   }
 
   const llm = service<LlmFace>(ctx, 'llm')
   const seen = new Set<string>()
   const routes: ModelRoute[] = []
-  for (const entry of selection.allowedModels) {
+  for (const entry of allowed) {
     if (
       !isRecord(entry) ||
       typeof entry.provider !== 'string' ||
@@ -126,5 +127,5 @@ export async function collectModelRoutes(ctx: ContextReader): Promise<ModelRoute
     }
     routes.push({ provider: entry.provider, model: entry.model, efforts, defaultEffort })
   }
-  return { enabled: selection.enabled === true, routes }
+  return { enabled: true, routes }
 }

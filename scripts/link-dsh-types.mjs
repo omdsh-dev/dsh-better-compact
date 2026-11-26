@@ -23,7 +23,7 @@
 import { lstat, mkdir, readdir, readlink, rm, symlink } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { typeTreeCandidates } from './lib/dsh-types-source.mjs'
+import { typeTreeCandidates } from './dsh-types-source.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -55,7 +55,7 @@ const source = await pickSource()
 if (source === undefined) {
   console.error('link-dsh-types: no DSH type tree found. Tried:\n  ' + candidates.join('\n  '))
   console.error('Set DSH_PACKAGE_ROOT, pass --from <dir>, or install one with:')
-  console.error('  npm install --prefix .dsh-dev/runtime @deepseek-ai/dsh@0.2.2-rc.3')
+  console.error('  npm install --prefix .dsh-dev/runtime @deepseek-ai/dsh@0.2.3-alpha.2')
   process.exit(1)
 }
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join, resolve } from 'node:path'
-import { typeTreeCandidates } from '../scripts/lib/dsh-types-source.mjs'
+import { typeTreeCandidates } from '../scripts/dsh-types-source.mjs'
 
 test('DSH_PACKAGE_ROOT accepts the package, peer-directory and runtime-root shapes', () => {
   const runtime = join('/opt', 'dsh-runtime')

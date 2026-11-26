@@ -156,7 +156,7 @@ function rejectUntrustedRequest(
   unavailableCode: string,
 ): boolean {
   const connection = optionalService<ConnectionService>(ctx, 'connection')
-  if (typeof connection?.requestRejection !== 'function') {
+  if (typeof connection?.admit !== 'function') {
     sendJson(res, 503, {
       code: unavailableCode,
       message: 'the host connection trust fence is unavailable; the read-only API route is disabled',
@@ -165,7 +165,8 @@ function rejectUntrustedRequest(
   }
   let rejection: number | undefined
   try {
-    rejection = connection.requestRejection(req)
+    const admission = connection.admit(req)
+    if ('rejection' in admission) rejection = admission.rejection
   } catch (error) {
     sendJson(res, 503, {
       code: 'CONNECTION_FENCE_UNAVAILABLE',
@@ -440,8 +441,8 @@ export function apply(ctx: Context, config: unknown = {}): void {
   // connection fence, so the read-only routes are simply not registered.
   // Waiting for both services makes "no connection" fail closed instead of
   // exposing an unauthenticated read route.
-  ctx.inject(['webServer', 'connection'], (inner) => {
-    if (typeof inner.connection?.requestRejection !== 'function') {
+  ctx.inject(['webServer', 'connection', 'connection.authentication'], (inner) => {
+    if (typeof inner.connection?.admit !== 'function') {
       inner.logger?.warn?.('dsh-better-compact: read-only API routes disabled because the Host connection fence is unavailable')
       return
     }

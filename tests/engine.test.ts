@@ -141,7 +141,16 @@ async function makeEngine(
   ctx.provide('llm', services.llm ?? {})
   ctx.provide('tokenMeter', services.tokenMeter ?? {})
   ctx.provide('sessions', services.sessions ?? {})
-  for (const [name, value] of Object.entries(services.extra ?? {})) ctx.provide(name, value)
+  // The native base registers its answered-route projection in the constructor
+  // and reads it from `summarize()`; a case may add its own snapshot on top.
+  ctx.provide('sessionProjections', {
+    register: () => Promise.resolve({ stateOf: () => undefined }),
+    snapshot: () => ({ values: {} }),
+    ...(services.extra?.sessionProjections ?? {}),
+  })
+  for (const [name, value] of Object.entries(services.extra ?? {})) {
+    if (name !== 'sessionProjections') ctx.provide(name, value)
+  }
   const engine = new Engine(ctx)
   return { ctx, engine, dispose: () => ctx.fiber.dispose() }
 }
@@ -170,7 +179,7 @@ test('the engine reads only the frozen snapshot and keeps the native base config
     assert.equal(engine.config.thresholdRatio, 0.5)
     assert.equal(engine.config.retainRatio, 0.1)
     assert.deepEqual(Engine.Config({}), {})
-    assert.deepEqual(Engine.inject, ['llm', 'tokenMeter', 'sessions', 'betterCompactConfig'])
+    assert.deepEqual(Engine.inject, ['llm', 'tokenMeter', 'sessions', 'sessionProjections', 'betterCompactConfig'])
   } finally {
     await dispose()
   }

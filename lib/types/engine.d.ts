@@ -25,7 +25,7 @@ import z from '@deepseek-ai/schemastery';
 import type { Context } from '@deepseek-ai/cordis';
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic';
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction';
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand';
+import type { CommandId } from '@deepseek-ai/dsh-commands/types';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ContentBlock, LlmResolvedModelInfo, ReasoningEffortId } from '@deepseek-ai/dsh-llm';
 import type { CompactionMode, ConfigSnapshot } from './shared/contract.ts';

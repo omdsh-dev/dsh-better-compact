@@ -339,7 +339,7 @@ export function projectLastCompaction(
   let status: InspectLastCompaction['status']
   if (end === undefined) {
     status = isSummaryActive(sessionId, id) ? 'running' : 'failed'
-  } else if (failureMatches && observedFailure.status === 'persistence-error') {
+  } else if (failureMatches && observedFailure !== undefined && observedFailure.status === 'persistence-error') {
     status = 'persistence-error'
   } else if (end.data.error !== undefined) {
     status = /abort|cancel/i.test(end.data.error) ? 'cancelled' : 'failed'

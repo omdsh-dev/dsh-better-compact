@@ -476,18 +476,19 @@ The read-only payload is the shared contract the visual settings page renders; t
 ## Known pre-existing failure (not a regression)
 
 `scripts/runtime-smoke.mjs` stops at the model-switch turn of the
-`better-compact` preset realm on DSH 0.2.2-rc.2:
+`better-compact` preset realm on DSH 0.2.3-alpha.2:
 
 ```
 MODEL_SWITCH_COMPACTION_FAILED: Cannot switch to it-noop/smaller: context
 compaction failed: compaction still above threshold after 1 compaction
-attempts (7897 estimated tokens >= threshold 7500)
+attempts (7589 estimated tokens >= threshold 7500)
 ```
 
-The host realm and every check before it pass. This was verified A/B against
-the pre-TypeScript implementation (`v0.4.1`, `src/*.js`) on the same rc.2
-runtime: identical assertion, identical turn number, identical 7897/7500
-numbers, identical `checks so far` list. It is therefore a defect of the
+The host realm and every check before it pass. On DSH 0.2.2-rc.2 the same
+point was verified A/B against the pre-TypeScript implementation (`v0.4.1`,
+`src/*.js`) on the same runtime: identical assertion, identical turn number,
+identical 7897/7500 numbers, identical `checks so far` list. The 0.2.3 number
+differs only through the host's estimate. It is therefore a defect of the
 0.4.1 engine in the preset realm (model-switch pressure with
 `compactionRetries: 0`), not something the TypeScript port introduced — and it
 doubles as evidence that the port is behaviour-preserving. Triage on its own;

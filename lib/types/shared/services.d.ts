@@ -106,7 +106,12 @@ export interface AgentPresetsService {
 }
 /** `connection` trust-fence face. */
 export interface ConnectionService {
-    requestRejection(req: unknown): number | undefined;
+    /** Host/Origin and credential admission; a rejection carries the HTTP status. */
+    admit(req: unknown): {
+        peer: unknown;
+    } | {
+        rejection: number;
+    };
 }
 /** `webServer` route registration face. */
 export interface WebServerService {

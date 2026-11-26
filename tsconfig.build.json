@@ -1,12 +1,13 @@
 {
-  "//": "Declaration build for the published types surface: emits lib/types/*.d.ts mirroring src (rootDir pinned so the layout matches the package exports). tsdown bundles the JS.",
+  "//": "pnpm links @deepseek-ai/* through the virtual store; preserving symlinks keeps the inferred schema type nameable in the emitted declarations (otherwise tsc emits TS2742 for z.object() results).",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
     "declaration": true,
     "emitDeclarationOnly": true,
     "outDir": "lib/types",
-    "rootDir": "src"
+    "rootDir": "src",
+    "preserveSymlinks": true
   },
   "include": [
     "src"

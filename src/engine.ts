@@ -27,7 +27,7 @@ import type { Context, EventOptions } from '@deepseek-ai/cordis'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import type { CommandId } from '@deepseek-ai/dsh-commands/types'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   BlockAssembler,

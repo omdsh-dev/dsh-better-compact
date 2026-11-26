@@ -28,7 +28,7 @@ interface ContextReader {
  * Project the host's allowed model routes with their advertised efforts.
  *
  * Mirrors the small `collectTierRoutes` pattern in `dsh-better-subagent`:
- * `subagentModelSelection.current().allowedModels` is the candidate source and
+ * `subagentModelSelection.allowedRoutes()` is the candidate source and
  * `ctx.llm.resolveModelInfo(provider, model)` supplies the opaque effort ids.
  * A failed per-route capability lookup only empties that route's effort list;
  * it never hides the route or invents an effort.

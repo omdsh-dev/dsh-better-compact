@@ -41,7 +41,7 @@ function fakeResponse(): FakeResponse {
   return response as unknown as FakeResponse
 }
 
-const allowFence = { requestRejection: () => undefined }
+const allowFence = { admit: () => ({ peer: {} }) }
 
 interface CtxOptions {
   selection?: unknown
@@ -50,7 +50,7 @@ interface CtxOptions {
 }
 
 function ctxWith({ selection, llm, connection }: CtxOptions = {}) {
-  const calls = { current: 0, resolveModelInfo: [] as unknown[] }
+  const calls = { allowedRoutes: 0, resolveModelInfo: [] as unknown[] }
   return {
     calls,
     ctx: {
@@ -58,8 +58,8 @@ function ctxWith({ selection, llm, connection }: CtxOptions = {}) {
         if (name === 'subagentModelSelection') {
           if (selection === undefined) return undefined
           return {
-            current: () => {
-              calls.current += 1
+            allowedRoutes: () => {
+              calls.allowedRoutes += 1
               return typeof selection === 'function' ? (selection as () => unknown)() : selection
             },
           }
@@ -83,23 +83,20 @@ test('models route is disabled without the host allowed-model service', async ()
   })
   assert.deepEqual(await collectModelRoutes(broken.ctx), { enabled: false, routes: [] })
 
-  for (const malformed of [null, {}, { allowedModels: 'nope' }, { enabled: true }]) {
+  for (const malformed of [null, {}, { allowedModels: 'nope' }, 'nope']) {
     const { ctx: malformedCtx } = ctxWith({ selection: malformed })
     assert.deepEqual(await collectModelRoutes(malformedCtx), { enabled: false, routes: [] })
   }
 })
 
 test('models route enriches allowed candidates with advertised efforts only', async () => {
-  const selection = {
-    enabled: true,
-    allowedModels: [
-      { provider: 'prov', model: 'good' },
-      { provider: 'prov', model: 'no-metadata' },
-      { provider: 'prov', model: 'good' },
-      { provider: '', model: 'invalid' },
-      'not-an-object',
-    ],
-  }
+  const selection = [
+    { provider: 'prov', model: 'good' },
+    { provider: 'prov', model: 'no-metadata' },
+    { provider: 'prov', model: 'good' },
+    { provider: '', model: 'invalid' },
+    'not-an-object',
+  ]
   const { ctx } = ctxWith({
     selection,
     llm: {
@@ -127,7 +124,7 @@ test('models route enriches allowed candidates with advertised efforts only', as
 
 test('models route keeps candidates when capability metadata or the llm service is absent', async () => {
   const { ctx } = ctxWith({
-    selection: { enabled: false, allowedModels: [{ provider: 'p', model: 'm' }] },
+    selection: [{ provider: 'p', model: 'm' }],
     llm: {
       resolveModelInfo: async () => ({
         reasoning: { efforts: [{ id: 'medium' }], defaultEffort: 'not-advertised' },
@@ -135,12 +132,12 @@ test('models route keeps candidates when capability metadata or the llm service 
     },
   })
   assert.deepEqual(await collectModelRoutes(ctx), {
-    enabled: false,
+    enabled: true,
     routes: [{ provider: 'p', model: 'm', efforts: ['medium'], defaultEffort: '' }],
   })
 
   const noLlm = ctxWith({
-    selection: { enabled: true, allowedModels: [{ provider: 'p', model: 'm' }] },
+    selection: [{ provider: 'p', model: 'm' }],
   })
   assert.deepEqual(await collectModelRoutes(noLlm.ctx), {
     enabled: true,
@@ -150,7 +147,7 @@ test('models route keeps candidates when capability metadata or the llm service 
 
 test('models handler returns read-only JSON with no-store and ignores the query', async () => {
   const { ctx } = ctxWith({
-    selection: { enabled: true, allowedModels: [{ provider: 'p', model: 'm' }] },
+    selection: [{ provider: 'p', model: 'm' }],
     llm: { resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: 'low' }], defaultEffort: 'low' } }) },
     connection: allowFence,
   })
@@ -168,9 +165,9 @@ test('models handler returns read-only JSON with no-store and ignores the query'
 test('models handler applies the host fence before any model work and is GET-only', async () => {
   for (const status of [401, 403]) {
     const { ctx, calls } = ctxWith({
-      selection: { enabled: true, allowedModels: [{ provider: 'p', model: 'm' }] },
+      selection: [{ provider: 'p', model: 'm' }],
       llm: { resolveModelInfo: async () => assert.fail('fenced request must not resolve a model') },
-      connection: { requestRejection: () => status },
+      connection: { admit: () => ({ rejection: status }) },
     })
     const res = fakeResponse()
     await handleModels(ctx, fakeRequest({ method: 'POST' }), res)
@@ -178,11 +175,11 @@ test('models handler applies the host fence before any model work and is GET-onl
     assert.equal(res.body, '')
     assert.equal(res.headers['cache-control'], 'no-store')
     assert.equal(res.headers['content-type'], undefined)
-    assert.equal(calls.current, 0)
+    assert.equal(calls.allowedRoutes, 0)
   }
 
   const method = ctxWith({
-    selection: { enabled: true, allowedModels: [] },
+    selection: [],
     connection: allowFence,
   })
   const res = fakeResponse()
@@ -190,23 +187,23 @@ test('models handler applies the host fence before any model work and is GET-onl
   assert.equal(res.statusCode, 405)
   assert.equal(res.headers.allow, 'GET')
   assert.equal(res.headers['cache-control'], 'no-store')
-  assert.equal(method.calls.current, 0)
+  assert.equal(method.calls.allowedRoutes, 0)
 })
 
 test('models handler fails closed when the connection fence disappears or throws', async () => {
   const missing = ctxWith({
-    selection: { enabled: true, allowedModels: [{ provider: 'p', model: 'm' }] },
+    selection: [{ provider: 'p', model: 'm' }],
   })
   const res = fakeResponse()
   await handleModels(missing.ctx, fakeRequest(), res)
   assert.equal(res.statusCode, 503)
   assert.match(res.body, /MODELS_UNAVAILABLE/)
   assert.equal(res.headers['cache-control'], 'no-store')
-  assert.equal(missing.calls.current, 0)
+  assert.equal(missing.calls.allowedRoutes, 0)
 
   const throwing = ctxWith({
     connection: {
-      requestRejection: () => {
+      admit: () => {
         throw new Error('fence exploded')
       },
     },

@@ -104,7 +104,7 @@ function fakeStore(overrides: Partial<FontStore> = {}): {
 /** A context whose connection fence accepts every request. */
 function trustedContext(): Context {
   return {
-    get: (name: string) => (name === 'connection' ? { requestRejection: () => undefined } : undefined),
+    get: (name: string) => (name === 'connection' ? { admit: () => ({ peer: {} }) } : undefined),
   } as unknown as Context
 }
 
@@ -184,7 +184,7 @@ test('requires a JSON content type on the install path', async () => {
 test('applies the host fence before any work', async () => {
   const facade = fakeStore()
   const rejecting = {
-    get: (name: string) => (name === 'connection' ? { requestRejection: () => 403 } : undefined),
+    get: (name: string) => (name === 'connection' ? { admit: () => ({ rejection: 403 }) } : undefined),
   } as unknown as Context
   const { res } = await invoke({ method: 'POST', headers: { 'content-type': 'application/json' }, ctx: rejecting, store: facade.store })
   assert.equal(res.statusCode, 403)
@@ -198,7 +198,7 @@ test('fails closed when the connection fence is missing or broken', async () => 
   assert.equal(JSON.parse(missingRes.body).code, 'FONT_UNAVAILABLE')
 
   const throwing = {
-    get: (name: string) => (name === 'connection' ? { requestRejection: () => { throw new Error('fence down') } } : undefined),
+    get: (name: string) => (name === 'connection' ? { admit: () => { throw new Error('fence down') } } : undefined),
   } as unknown as Context
   const throwingRes = (await invoke({ method: 'GET', ctx: throwing })).res
   assert.equal(throwingRes.statusCode, 503)

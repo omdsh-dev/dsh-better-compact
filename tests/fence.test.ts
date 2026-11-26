@@ -63,7 +63,7 @@ function ctxWith(connection: object | undefined): Context {
 
 /** The route is only registered with a fence; tests that bypass registration
  * still provide the same contract explicitly. */
-const allowFence = { requestRejection: () => undefined }
+const allowFence = { admit: () => ({ peer: {} }) }
 
 test('the Host connection fence rejects before method, query, or session work', async () => {
   for (const status of [401, 403]) {
@@ -71,7 +71,7 @@ test('the Host connection fence rejects before method, query, or session work', 
     let inspected = false
     const ctx = asContext({
       get: (name: string) => {
-        if (name === 'connection') return { requestRejection: () => status }
+        if (name === 'connection') return { admit: () => ({ rejection: status }) }
         if (name === 'sessionQuery') {
           inspected = true
           return { observeSession: async () => undefined }
@@ -91,7 +91,7 @@ test('the Host connection fence rejects before method, query, or session work', 
 test('a failing connection fence returns a readable 503 instead of crashing', async () => {
   const res = fakeResponse()
   const ctx = ctxWith({
-    requestRejection: () => {
+    admit: () => {
       throw new Error('fence exploded')
     },
   })
@@ -131,7 +131,7 @@ test('the route registration waits for both webServer and connection', () => {
   })
   apply(ctx, { mode: 'goal' })
   assert.deepEqual(injections[0], ['settings'])
-  assert.deepEqual(injections[1], ['webServer', 'connection'])
+  assert.deepEqual(injections[1], ['webServer', 'connection', 'connection.authentication'])
   // The gated callback body never ran, so no route effect was registered.
   assert.equal(effects.includes('unreachable'), false)
   assert.ok(provided.betterCompactConfig)
