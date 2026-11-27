@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-compact",
-  "version": "0.5.1-alpha.1",
+  "version": "0.5.2-alpha.1",
   "description": "Independent DSH compaction plugin: native, goal-aware, and file-handoff checkpoints with a read-only inspect API.",
   "license": "Apache-2.0",
   "repository": {
