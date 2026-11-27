@@ -348,7 +348,7 @@ export function BetterCompactPage(props: BetterCompactPageProps): React.ReactEle
       <ActiveConfigBanner activeConfig={activeConfig} requiresReload={requiresReload} dirty={dirty} />
       <ProcessEditor draft={draft ?? draftFromValue({})} disabled={disabled} fieldError={fieldError} onDraft={updateDraft}
         projection={projection} budget={budget} preview={preview} sessionControl={sessionControl} sessionId={selectedId}
-        draftInvalid={draftErrors.length > 0} engineApplies={engineApplies} inspectLoading={inspectLoading} inspectError={inspectError}
+        dirty={dirty} draftInvalid={draftErrors.length > 0} engineApplies={engineApplies} inspectLoading={inspectLoading} inspectError={inspectError}
         routes={routes} modelsStatus={modelsInspect.status} modelsEnabled={modelsEnabled} modelsError={modelsError}
         route={draftRoute} target={budgetTarget} routeWarning={routeWarning}
         onProvider={(value) => updateDraft(value === '' ? { provider: '', model: '' } : { provider: value })}

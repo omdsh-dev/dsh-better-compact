@@ -129,7 +129,7 @@ test('an unknown model capacity keeps the draft budget unavailable instead of in
   assert.match(ui.text(ui.by('budget-incomplete')), /选择会话后可读取当前用量/)
   assert.match(ui.text(ui.by('runtime-budget')), /用量未知/)
   assert.match(ui.text(ui.by('measurement')), /用量未知/)
-  assert.match(ui.text(ui.by('no-safe-cut')), /当前无安全压缩选区/)
+  assert.match(ui.text(ui.by('no-safe-cut')), /当前没有可以安全压缩的选区/)
   ui.dispose()
 })
 
@@ -158,9 +158,8 @@ test('the last compaction record renders each measured field and the persistence
 
 test('the safe cut renders the inspected range and upper bound, and disappears without one', async () => {
   const ui = await mount(payload())
-  assert.match(ui.text(ui.by('safe-cut')), /选区 1–2/)
-  assert.match(ui.text(ui.by('safe-cut')), /压缩前 600 tokens/)
-  assert.match(ui.text(ui.by('safe-cut')), /上界 ≤ 300 tokens/)
+  assert.match(ui.text(ui.by('safe-cut')), /压缩第 1–2 条消息/)
+  assert.match(ui.text(ui.by('safe-cut')), /从 600 tokens 降到最多 300 tokens/)
   assert.match(ui.text(ui.by('runtime-budget')), /距离自动压缩还有 230 tokens/)
   assert.equal(ui.countBy('runtime-preview'), 1)
   ui.dispose()
@@ -169,7 +168,7 @@ test('the safe cut renders the inspected range and upper bound, and disappears w
     preview: { beforeTokens: 600, afterUpperBoundTokens: null, retainedTokens: undefined, replacedTokens: undefined, rangeStart: null, rangeEnd: null, reason: null },
   }))
   assert.equal(none.countBy('safe-cut'), 0)
-  assert.match(none.text(none.by('no-safe-cut')), /当前无安全压缩选区/)
+  assert.match(none.text(none.by('no-safe-cut')), /当前没有可以安全压缩的选区/)
   assert.equal(none.countBy('runtime-preview'), 1)
   none.dispose()
 })

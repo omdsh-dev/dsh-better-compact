@@ -11,60 +11,6 @@ import { DEFAULT_RETAIN_RATIO, type ConfigDraft } from './draft.ts'
 import { t } from './locales/index.ts'
 import { processText, ratioText, tokensText, type ProjectedBudget } from './controls.tsx'
 
-export interface ModeDiagramProps {
-  mode: string
-  projected?: ProjectedBudget | null
-  cachePriority?: boolean
-  fixedTokens?: number | null
-}
-
-/** Schematic per-mode flow. Token values are labelled estimates, never usage. */
-export function ModeDiagram(props: ModeDiagramProps): React.ReactElement {
-  const { mode, projected, cachePriority, fixedTokens } = props
-  const retain = projected ? projected.retain : null
-  const fixed = typeof fixedTokens === 'number' && Number.isFinite(fixedTokens) ? fixedTokens : 0
-  const earlier = projected ? Math.max(0, projected.threshold - projected.retain - fixed) : null
-  const result = mode === 'native' ? processText('summary')
-    : mode === 'goal' ? processText('goalSummary')
-      : mode === 'handoff' ? processText('handoffBody')
-        : processText('customSummary')
-  const resultNote = mode === 'handoff' ? t('handoffNote')
-    : mode === 'custom' ? t('customNote')
-      : mode === 'native' ? t('nativeNote')
-        : t('goalNote')
-  return (
-    <div className="dsh-bc-flow" data-bc="mode-diagram" data-mode-diagram={mode} aria-hidden={true}>
-      <div className="dsh-bc-flow-prefix">
-        <span>{processText('fixedPrefix')}</span>
-        {cachePriority && mode !== 'native' ? <span className="dsh-bc-flow-chip">{t('cacheChip')}</span> : null}
-      </div>
-      <div className="dsh-bc-flow-row">
-        <div className="dsh-bc-flow-node">
-          <strong>{processText('earlier')}</strong>
-          <span>{earlier === null ? '\u2014' : '\u2248 ' + tokensText(earlier)}</span>
-        </div>
-        {(mode === 'goal' || mode === 'handoff') ? (
-          <div className="dsh-bc-flow-node dsh-bc-flow-state">
-            <strong>{t('goalState')}</strong><span>{t('modeGoalTag')}</span>
-          </div>
-        ) : null}
-        {mode === 'custom' ? (
-          <div className="dsh-bc-flow-node dsh-bc-flow-state">
-            <strong>{t('customState')}</strong><span>{t('modeCustomTag')}</span>
-          </div>
-        ) : null}
-        <div className="dsh-bc-flow-node dsh-bc-flow-tail">
-          <strong>{processText('recent')}</strong>
-          <span>{retain === null ? '\u2014' : '\u2248 ' + tokensText(retain)}</span>
-        </div>
-      </div>
-      <div className="dsh-bc-flow-arrow">{'\u2193'}</div>
-      <div className="dsh-bc-flow-result">
-        <strong>{result}</strong><span>{resultNote}</span>
-      </div>
-    </div>
-  )
-}
 
 export interface CompactionFlowProps {
   mode: string

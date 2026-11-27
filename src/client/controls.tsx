@@ -171,6 +171,8 @@ export interface FieldProps {
   hint?: React.ReactNode
   help?: React.ReactNode
   error?: React.ReactNode
+  /** Id of a visible label rendered elsewhere (a setting-row label). */
+  labelledBy?: string
   children: (id: string, aria: FieldAria) => React.ReactNode
 }
 
@@ -180,8 +182,10 @@ export function Field(props: FieldProps): React.ReactElement {
   const described = props.error ? id + '-error' : props.hint !== undefined || props.help !== undefined ? id + '-help' : undefined
   return (
     <div className="dsh-bc-field">
-      <label id={id + '-label'} htmlFor={id} className="dsh-bc-label">{props.label}</label>
-      {props.children(id, { 'aria-labelledby': id + '-label', 'aria-invalid': props.error ? true : undefined, 'aria-describedby': described })}
+      {props.labelledBy === undefined
+        ? <label id={id + '-label'} htmlFor={id} className="dsh-bc-label">{props.label}</label>
+        : null}
+      {props.children(id, { 'aria-labelledby': props.labelledBy ?? id + '-label', 'aria-invalid': props.error ? true : undefined, 'aria-describedby': described })}
       {props.hint !== undefined
         ? <p id={id + '-help'} className="dsh-bc-hint">{props.hint}</p>
         : props.help !== undefined ? <p id={id + '-help'} className="dsh-bc-help dsh-bc-sr-only">{props.help}</p> : null}
@@ -334,6 +338,10 @@ export interface NumberFieldProps {
   hint?: React.ReactNode
   help?: React.ReactNode
   error?: React.ReactNode
+  /** Label id owned by the surrounding setting row; hides the field's own label. */
+  labelledBy?: string
+  /** 96px right-aligned input for a setting row. */
+  inline?: boolean
   onChange: (value: string) => void
 }
 
@@ -341,9 +349,9 @@ export function NumberField(props: NumberFieldProps): React.ReactElement {
   const ratio = props.ratio === true
   const display = ratio && props.value !== '' ? String(Number((Number(props.value) * 100).toFixed(8))) : props.value
   return (
-    <Field name={props.name} label={props.label} hint={props.hint} help={props.help} error={props.error}>
+    <Field name={props.name} label={props.label} hint={props.hint} help={props.help} error={props.error} labelledBy={props.labelledBy}>
       {(id, aria) => (
-        <div className="dsh-bc-number">
+        <div className={props.inline === true ? 'dsh-bc-number dsh-bc-number-inline' : 'dsh-bc-number'}>
           <input {...aria} id={id} name={props.name} className="dsh-bc-input" type="number"
             inputMode={ratio ? 'decimal' : 'numeric'} min={props.min ?? 0} max={ratio ? 100 : undefined}
             step={ratio ? 'any' : 1} value={display} disabled={props.disabled} placeholder={props.placeholder}
@@ -534,6 +542,30 @@ export function ModeCards(props: ModeCardsProps): React.ReactElement {
   )
 }
 
+export interface SettingRowProps {
+  label: React.ReactNode
+  /** One consequence line; omit when the label already explains the choice. */
+  desc?: React.ReactNode
+  children: (labelId: string) => React.ReactNode
+}
+
+/**
+ * One setting: label and consequence on the left, the control right-aligned.
+ * The generated label id is handed to the control for `aria-labelledby`.
+ */
+export function SettingRow(props: SettingRowProps): React.ReactElement {
+  const labelId = 'dsh-bc-setting-' + React.useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  return (
+    <div className="dsh-bc-setting-row">
+      <div className="dsh-bc-setting-main">
+        <span className="dsh-bc-setting-label" id={labelId}>{props.label}</span>
+        {props.desc === undefined || props.desc === null ? null : <span className="dsh-bc-setting-desc">{props.desc}</span>}
+      </div>
+      <div className="dsh-bc-setting-control">{props.children(labelId)}</div>
+    </div>
+  )
+}
+
 export interface ToggleProps {
   name: string
   label: React.ReactNode
@@ -631,112 +663,3 @@ export function ReasonList(props: ReasonListProps): React.ReactElement | null {
     </ul>
   )
 }
-
-/** One proportional bar segment. */
-export interface BarSegment {
-  readonly key: string
-  readonly tokens: number
-  readonly tone?: string
-  readonly label: string
-}
-
-export interface TokenBarProps {
-  scale: number
-  segments?: readonly BarSegment[]
-  triggerTokens?: number | null
-  currentTokens?: number | null
-  ariaLabel: string
-  name: string
-}
-
-/** One proportional bar with a trigger marker and an optional reserve zone. */
-export function TokenBar(props: TokenBarProps): React.ReactElement | null {
-  if (!(props.scale > 0)) return null
-  const markers: readonly (readonly [string, number | null | undefined])[] = [['trigger', props.triggerTokens], ['current', props.currentTokens]]
-  return (
-    <div className="dsh-bc-bar" role="img" aria-label={props.ariaLabel} data-bc={props.name}>
-      <div className="dsh-bc-bar-track">
-        {(props.segments ?? []).filter((segment) => segment.tokens > 0).map((segment) => (
-          <div key={segment.key} className={'dsh-bc-bar-seg dsh-bc-seg-' + (segment.tone ?? 'free')}
-            title={segment.label + ' \u00b7 ' + tokensText(segment.tokens)}
-            style={{ width: String(percentOf(segment.tokens, props.scale)) + '%' }} />
-        ))}
-      </div>
-      {markers.map(([name, value]) => typeof value === 'number' && Number.isFinite(value) ? (
-        <div key={name} className={name === 'trigger' ? 'dsh-bc-trigger' : 'dsh-bc-current-line'}
-          style={{ left: String(percentOf(value, props.scale)) + '%' }} aria-hidden={true} />
-      ) : null)}
-    </div>
-  )
-}
-
-/** One legend entry. */
-export interface LegendItem {
-  readonly key: string
-  readonly label: string
-  readonly tokens?: number | null
-  readonly tone?: string
-}
-
-export interface TokenLegendProps {
-  name: string
-  items?: readonly LegendItem[]
-}
-
-/** Legend for one bar. */
-export function TokenLegend(props: TokenLegendProps): React.ReactElement {
-  return (
-    <ul className="dsh-bc-legend" data-bc={props.name}>
-      {(props.items ?? []).map((item) => (
-        <li key={item.key}>
-          <span className={'dsh-bc-swatch dsh-bc-swatch-' + (item.tone ?? 'free')} aria-hidden={true} />
-          <span>{typeof item.tokens === 'number' ? item.label + ': ' + tokensText(item.tokens) : item.label + ': ' + t('unknown')}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-export interface RatioControlProps {
-  name: string
-  sliderName?: string
-  label: string
-  value: string
-  disabled?: boolean
-  error?: string
-  onChange: (value: string) => void
-}
-
-export function RatioControl(props: RatioControlProps): React.ReactElement {
-  const rawId = React.useId()
-  const id = 'dsh-bc-ratio-' + rawId.replace(/[^a-zA-Z0-9_-]/g, '')
-  const value = props.value === '' ? '' : String(Number((Number(props.value) * 100).toFixed(8)))
-  const ratio = Math.max(0.01, Math.min(0.99, Number(props.value) || 0.01))
-  return (
-    <div className="dsh-bc-field dsh-bc-threshold">
-      <div className="dsh-bc-thresholdHead">
-        <label className="dsh-bc-label" htmlFor={id}>{props.label}</label>
-        <div className="dsh-bc-number dsh-bc-number-inline">
-          <input id={id} name={props.name} className="dsh-bc-input" type="number" inputMode="decimal"
-            min={0} max={100} step="any" value={value} disabled={props.disabled}
-            aria-label={props.label} aria-invalid={props.error ? true : undefined}
-            aria-describedby={props.error ? id + '-error' : undefined}
-            onChange={(event) => props.onChange(event.target.value === '' ? '' : String(Number(event.target.value) / 100))} />
-          <span className="dsh-bc-unit" aria-hidden={true}>%</span>
-        </div>
-      </div>
-      <div className="dsh-bc-range-wrap">
-        <span className="dsh-bc-range-fill" aria-hidden={true} style={{ width: String(percentOf(ratio - 0.01, 0.98)) + '%' }} />
-        <input name={props.sliderName} type="range" className="dsh-bc-range" min={0.01} max={0.99} step={0.01}
-          aria-label={props.label} aria-valuetext={value === '' ? t('unset') : value + '%'} value={ratio}
-          disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)} />
-      </div>
-      <div className="dsh-bc-scale" aria-hidden={true}>
-        <span>1%</span><span>50%</span><span>99%</span>
-      </div>
-      {props.error ? <p id={id + '-error'} className="dsh-bc-error" role="alert">{props.error}</p> : null}
-    </div>
-  )
-}
-
-export type { InspectPreview }

@@ -34,6 +34,7 @@ import {
   ReasonList,
   Row,
   Section,
+  SettingRow,
   Select,
   Toggle,
   tokensText,
@@ -146,6 +147,8 @@ export interface CapacityBarProps {
   projected?: ProjectedBudget | null
   budget?: InspectBudget | null
   disabled?: boolean
+  /** The cap moves the trigger below the configured ratio; label the real cut. */
+  limited?: boolean
   onDraft: DraftPatch
 }
 
@@ -182,7 +185,6 @@ export function CapacityBar(props: CapacityBarProps): React.ReactElement {
     { key: 'retained', width: Math.max(0, Math.min(100, retainRatio * 100)) },
     { key: 'headroom', width: Math.max(0, 100 - ratio * 100) },
   ]
-  const triggerPercent = known ? Math.max(0, Math.min(100, knownThreshold / knownWindow * 100)) : 0
   const ratioPercent = Math.max(1, Math.min(99, ratio * 100))
   const retainPercent = known ? Math.max(1, Math.min(99, (knownThreshold - knownRetain) / knownWindow * 100)) : Math.max(1, Math.min(99, (1 - retainRatio) * 100))
   const currentPercent = known && current !== null ? Math.max(0, Math.min(100, current / knownWindow * 100)) : null
@@ -206,10 +208,6 @@ export function CapacityBar(props: CapacityBarProps): React.ReactElement {
   const retainLabel = draft.retainMode === 'tokens' ? processText('retained') + ' ' + tokensText(Number(draft.retainTokens)) : processText('retainHandle') + ' ' + ratioText(retainRatio)
   return (
     <div className="dsh-bc-capacity" data-bc="capacity-bar">
-      <div className="dsh-bc-capacity-head">
-        <span className="dsh-bc-caption">{processText('configBudget')}</span>
-        <span className="dsh-bc-caption dsh-bc-mono" data-bc="capacity-ratio">{ratioText(ratio) + ' \u00b7 ' + (known ? tokensText(threshold) : t('unknown'))}</span>
-      </div>
       <div className="dsh-bc-bar dsh-bc-capacity-bar" ref={barRef} role="group"
         aria-label={unknown ? processText('unknownBudget') : processText('configBudget') + ': ' + ratioText(ratio) + ', ' + retainLabel}>
         <div className="dsh-bc-bar-track">
@@ -223,7 +221,6 @@ export function CapacityBar(props: CapacityBarProps): React.ReactElement {
         {!unknown && currentPercent !== null
           ? <span className="dsh-bc-current-line" style={{ left: currentPercent + '%' }} title={processText('currentUsage') + ' ' + tokensText(current)} data-bc="current-marker" />
           : null}
-        {known ? <span className="dsh-bc-trigger" style={{ left: triggerPercent + '%' }} title={processText('effective') + ' ' + ratioText(triggerPercent / 100)} data-bc="effective-trigger" /> : null}
         <CapacityHandle barRef={barRef} kind="trigger" percent={ratioPercent} label={processText('triggerHandle') + ' ' + ratioText(ratio)} valueText={processText('triggerHandle') + ' ' + ratioText(ratio)} disabled={disabled} onPercent={updateTrigger} />
         {draft.retainMode === 'ratio'
           ? <CapacityHandle barRef={barRef} kind="retain" percent={retainPercent} label={retainLabel} valueText={retainLabel} disabled={disabled} onPercent={updateRetain} />
@@ -231,21 +228,16 @@ export function CapacityBar(props: CapacityBarProps): React.ReactElement {
         {draft.retainMode === 'tokens'
           ? <span className="dsh-bc-retain-pin" style={{ left: retainPercent + '%' }} title={retainLabel} data-bc="retain-pin">{retainLabel}</span>
           : null}
+        {known && props.limited === true
+          ? <span className="dsh-bc-cut" style={{ left: Math.max(0, Math.min(100, knownThreshold / scale * 100)) + '%' }} data-bc="effective-trigger">
+            <span className="dsh-bc-cut-chip">{t('compactionCut') + ' ' + ratioText(knownThreshold / scale)}</span>
+          </span>
+          : null}
       </div>
-      <ul className="dsh-bc-capacity-legend" aria-hidden={true}>
-        {([['compressible', labelFor.compressible], ['retained', labelFor.retained], ['headroom', labelFor.headroom]] as const).map(([key, label]) => (
-          <li key={key}><span className={'dsh-bc-swatch dsh-bc-swatch-' + key} />{label}</li>
-        ))}
-      </ul>
-      {unknown ? <p className="dsh-bc-caption" data-bc="budget-incomplete">{processText('unknownBudget') + ' ' + t('ratioOnly')}</p> : null}
-      {known ? (
-        <div className="dsh-bc-capacity-labels">
-          <span>{processText('currentUsage') + ': ' + (current === null ? t('unknown') : tokensText(current))}</span>
-          <span>{processText('window') + ': ' + tokensText(windowTokens)}</span>
-          <span>{processText('effective') + ': ' + tokensText(threshold)}</span>
-          <span>{processText('retained') + ': ' + tokensText(retain)}</span>
-        </div>
-      ) : null}
+      <div className="dsh-bc-capacity-foot">
+        <span className="dsh-bc-caption">{t('capacityHintDrag')}</span>
+        {unknown ? <span className="dsh-bc-caption" data-bc="budget-incomplete">{t('capacityUnknownNote')}</span> : null}
+      </div>
     </div>
   )
 }
@@ -259,45 +251,44 @@ export interface CapacitySectionProps {
   sessionControl?: React.ReactNode
   fieldError: FieldErrorFn
   onDraft: DraftPatch
+  dirty?: boolean
 }
 
 /** Capacity, trigger, retention and the visible headroom field. */
 export function CapacitySection(props: CapacitySectionProps): React.ReactElement {
-  const { draft, disabled, projected, preview, fieldError, onDraft } = props
+  const { draft, disabled, projected, fieldError, onDraft } = props
   const ratio = Number(draft.thresholdRatio === '' ? 0.8 : draft.thresholdRatio)
   const retainRatio = Number(draft.retainRatio === '' ? DEFAULT_RETAIN_RATIO : draft.retainRatio)
-  const saved = preview && typeof preview.beforeTokens === 'number' && Number.isFinite(preview.beforeTokens)
-    && typeof preview.afterUpperBoundTokens === 'number' && Number.isFinite(preview.afterUpperBoundTokens)
-    ? preview.beforeTokens - preview.afterUpperBoundTokens : null
-  const savedPercent = saved !== null && preview && typeof preview.beforeTokens === 'number' && preview.beforeTokens > 0 ? saved / preview.beforeTokens * 100 : null
+  const p = projected ?? null
+  const known = p !== null
+  const retainText = draft.retainMode === 'tokens' ? tokensText(Number(draft.retainTokens)) : ratioText(retainRatio)
+  // Space can force the trigger below the configured ratio; state the effective point only then.
+  const effective = p !== null && p.window > 0 ? p.threshold / p.window : null
+  const limited = effective !== null && Math.abs(effective - ratio) > 0.005
+  const effect = p === null
+    ? t('capacityEffectUnknown', { trigger: ratioText(ratio), retain: retainText })
+    : t(limited ? 'capacityEffectLimited' : 'capacityEffect', {
+      trigger: ratioText(limited ? effective : ratio),
+      retain: tokensText(p.retain),
+      headroom: tokensText(p.headroom),
+    })
+  const current = typeof props.budget?.currentTokens === 'number' && Number.isFinite(props.budget.currentTokens) ? props.budget.currentTokens : null
+  const retainedRatioText = draft.retainRatio === '' ? String(DEFAULT_RETAIN_RATIO) : draft.retainRatio
   return (
     <Section name="capacity" dataBc="capacity" title={processText('capacityTitle')}
-      aside={<span className="dsh-bc-caption">{t('draftLabel')}</span>}>
-      <p className="dsh-bc-note">{processText('capacityIntro')}</p>
-      {props.sessionControl ? (
-        <div className="dsh-bc-session-row">
-          {props.sessionControl}
-          <p className="dsh-bc-caption dsh-bc-session-help">{processText('sessionHelp')}</p>
-        </div>
-      ) : null}
-      <div className="dsh-bc-auto-row">
-        <Toggle name="auto" label={processText('auto')} checked={draft.auto} disabled={disabled}
-          onChange={(auto) => onDraft({ auto })} />
-        <p className="dsh-bc-help dsh-bc-auto-help">{draft.auto ? processText('triggerHelp') : processText('autoOff')}</p>
+      aside={props.dirty === true ? <span className="dsh-bc-chip" data-tone="accent" data-bc="draft-chip">{t('draftUnsaved')}</span> : null}>
+      <div className="dsh-bc-session-row">
+        {props.sessionControl}
+        <p className="dsh-bc-caption dsh-bc-session-help">{processText('sessionHelp')}</p>
       </div>
+      <Toggle name="auto" label={processText('auto')} checked={draft.auto} disabled={disabled}
+        help={draft.auto ? processText('triggerHelp') : processText('autoOff')}
+        onChange={(auto) => onDraft({ auto })} />
       {draft.auto ? (
         <React.Fragment>
+          <p className="dsh-bc-effect" data-bc="effect-summary">{effect}</p>
           <div data-bc={projected ? 'draft-budget' : undefined}>
-            <CapacityBar draft={draft} projected={projected} budget={props.budget} disabled={disabled} onDraft={onDraft} />
-          </div>
-          <div className="dsh-bc-capacity-summary" data-bc="capacity-summary">
-            {saved !== null && preview && typeof preview.afterUpperBoundTokens === 'number' ? (
-              <React.Fragment>
-                <strong>{processText('before') + ' ' + tokensText(preview.beforeTokens) + ' \u2192 ' + processText('after') + ' \u2264 ' + tokensText(preview.afterUpperBoundTokens)}</strong>
-                {savedPercent !== null ? <span className="dsh-bc-savings">{processText('savings') + ' ' + tokensText(Math.max(0, saved)) + ' (' + ratioText(savedPercent / 100) + ')'}</span> : null}
-              </React.Fragment>
-            ) : projected ? <span className="dsh-bc-caption">{processText('effective') + ' ' + tokensText(projected.threshold) + ' \u00b7 ' + processText('retained') + ' ' + tokensText(projected.retain)}</span> : null}
-            {projected ? <p className="dsh-bc-caption">{processText('resultHelp')}</p> : null}
+            <CapacityBar draft={draft} projected={projected} budget={props.budget} disabled={disabled} limited={limited} onDraft={onDraft} />
           </div>
           {projected ? (
             <div className="dsh-bc-capacity-metrics">
@@ -305,37 +296,53 @@ export function CapacitySection(props: CapacitySectionProps): React.ReactElement
               <Metric label={processText('effective')} value={tokensText(projected.threshold)} name="draft-trigger" />
               <Metric label={processText('retained')} value={tokensText(projected.retain)} name="draft-retain" />
               <Metric label={processText('summaryBudget')} value={tokensText(projected.summary)} name="draft-summary" />
+              {current === null ? null : <Metric label={processText('currentUsage')} value={tokensText(current)} name="draft-current" />}
+              <Metric label={processText('window')} value={tokensText(projected.window)} name="draft-window" />
             </div>
           ) : null}
-          <div className="dsh-bc-capacity-controls">
-            <NumberField name="thresholdRatio" label={processText('triggerHandle')} ratio={true} value={draft.thresholdRatio}
-              disabled={disabled} error={fieldError('thresholdRatio')} onChange={(thresholdRatio) => onDraft({ thresholdRatio })} />
-            <div className="dsh-bc-retain-control">
-              <fieldset className="dsh-bc-retain-choice">
-                <legend className="dsh-bc-label">{processText('retain')}</legend>
-                <div className="dsh-bc-segmented">
-                  {([['ratio', processText('byRatio')], ['tokens', processText('fixed')]] as const).map(([value, label]) => (
-                    <label key={value} className="dsh-bc-segment" data-checked={draft.retainMode === value}>
-                      <input type="radio" name="retainMode" value={value} checked={draft.retainMode === value}
-                        disabled={disabled} onChange={() => onDraft({ retainMode: value })} />
-                      <span>{label}</span>
-                    </label>
-                  ))}
+          <div className="dsh-bc-rows">
+            <SettingRow label={processText('triggerHandle')}>
+              {(labelId) => (
+                <NumberField name="thresholdRatio" label={processText('triggerHandle')} ratio={true} value={draft.thresholdRatio}
+                  labelledBy={labelId} inline={true} disabled={disabled} error={fieldError('thresholdRatio')}
+                  onChange={(thresholdRatio) => onDraft({ thresholdRatio })} />
+              )}
+            </SettingRow>
+            <SettingRow label={t('retainRecentShort')} desc={processText('retainHelp')}>
+              {(labelId) => (
+                <div className="dsh-bc-retain-control">
+                  <fieldset className="dsh-bc-retain-choice">
+                    <legend className="dsh-bc-sr-only">{processText('retain')}</legend>
+                    <div className="dsh-bc-segmented">
+                      {([['ratio', processText('byRatio')], ['tokens', processText('fixed')]] as const).map(([value, label]) => (
+                        <label key={value} className="dsh-bc-segment" data-checked={draft.retainMode === value}>
+                          <input type="radio" name="retainMode" value={value} checked={draft.retainMode === value}
+                            disabled={disabled} onChange={() => onDraft({ retainMode: value })} />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  {draft.retainMode === 'ratio'
+                    ? <NumberField name="retainRatio" label={processText('retainHandle')} ratio={true} value={retainedRatioText}
+                        labelledBy={labelId} inline={true} disabled={disabled} error={fieldError('retainRatio')}
+                        onChange={(retainRatioValue) => onDraft({ retainRatio: retainRatioValue })} />
+                    : <NumberField name="retainTokens" label={processText('tokens')} value={draft.retainTokens}
+                        labelledBy={labelId} inline={true} disabled={disabled} error={fieldError('retainTokens')}
+                        onChange={(retainTokens) => onDraft({ retainTokens })} />}
                 </div>
-              </fieldset>
-              {draft.retainMode === 'ratio'
-                ? <NumberField name="retainRatio" label={processText('retainHandle')} ratio={true}
-                    value={draft.retainRatio === '' ? String(DEFAULT_RETAIN_RATIO) : draft.retainRatio}
-                    disabled={disabled} error={fieldError('retainRatio')} onChange={(retainRatioValue) => onDraft({ retainRatio: retainRatioValue })} />
-                : <NumberField name="retainTokens" label={processText('tokens')} value={draft.retainTokens}
-                    disabled={disabled} error={fieldError('retainTokens')} onChange={(retainTokens) => onDraft({ retainTokens })} />}
-            </div>
-            <NumberField name="headroomTokens" label={processText('headroom')} value={draft.headroomTokens}
-              disabled={disabled} error={fieldError('headroomTokens')} onChange={(headroomTokens) => onDraft({ headroomTokens })} />
+              )}
+            </SettingRow>
+            <SettingRow label={processText('headroom')} desc={processText('headroomHelp')}>
+              {(labelId) => (
+                <NumberField name="headroomTokens" label={processText('headroom')} value={draft.headroomTokens}
+                  labelledBy={labelId} inline={true} disabled={disabled} error={fieldError('headroomTokens')}
+                  onChange={(headroomTokens) => onDraft({ headroomTokens })} />
+              )}
+            </SettingRow>
           </div>
-          <p className="dsh-bc-caption">{processText('retainHelp') + ' ' + processText('headroomHelp')}</p>
         </React.Fragment>
-      ) : <p className="dsh-bc-note" data-bc="auto-off">{processText('autoOff')}</p>}
+      ) : null}
       {projected?.policy ? <p className="dsh-bc-note" data-bc="process-override">{processText('override')}</p> : null}
       {projected?.error ? <p className="dsh-bc-error" role="alert" data-bc="budget-constraint">{projected.error}</p> : null}
     </Section>
@@ -445,40 +452,35 @@ export function ProcessEditor(props: ProcessEditorProps): React.ReactElement {
       <Section name="strategy" dataBc="strategy" title={processText('strategyTitle')}>
         <div className="dsh-bc-strategy-layout">
           <div className="dsh-bc-strategy-choice">
-            <p className="dsh-bc-caption">{t('strategyChoiceLabel')}</p>
             <ModeCards value={draft.mode} disabled={disabled} onChange={changeMode} />
           </div>
           <div className="dsh-bc-strategy-figure">
-            <p className="dsh-bc-caption">{t('strategyFigureLabel')}</p>
             <CompactionFlow mode={draft.mode} draft={draft} projected={projected} preview={props.preview} fixedTokens={props.budget?.fixedTokens} />
           </div>
         </div>
         <div className="dsh-bc-strategy-extra">
           {draft.mode !== 'native' ? (
-            <div className="dsh-bc-cache-row">
-              <Toggle name="cachePriority" label={processText('cache')} checked={draft.cachePriority} disabled={disabled}
-                onChange={(cachePriority) => props.onDraft({ cachePriority })} />
-              <p className="dsh-bc-caption">{processText('cacheHelp')}</p>
-            </div>
+            <Toggle name="cachePriority" label={processText('cache')} help={processText('cacheHelp')} checked={draft.cachePriority} disabled={disabled}
+              onChange={(cachePriority) => props.onDraft({ cachePriority })} />
           ) : null}
-          <div className="dsh-bc-cache-row">
-            <Toggle name="summaryImage" label={t('summaryImage')} title={t('summaryImageHint')}
-              checked={draft.summaryImage} disabled={disabled || !summaryImageApplies}
-              onChange={(summaryImage) => props.onDraft({ summaryImage })} />
-          </div>
+          <Toggle name="summaryImage" label={t('summaryImage')} title={t('summaryImageHint')} help={t('summaryImageHelp')}
+            checked={draft.summaryImage} disabled={disabled || !summaryImageApplies}
+            onChange={(summaryImage) => props.onDraft({ summaryImage })} />
           <SummaryFontControl />
         </div>
       </Section>
-      <Section name="generation" dataBc="generation" title={processText('generationTitle')}
-        aside={<span className="dsh-bc-caption">{processText('generationIntro')}</span>}>
+      <Section name="generation" dataBc="generation" title={processText('generationTitle')}>
         <ModelSection draft={draft} routes={props.routes ?? []} route={props.route} target={props.target}
           disabled={disabled} fieldError={fieldError} onDraft={props.onDraft}
           onProvider={props.onProvider} onModel={props.onModel} routeWarning={props.routeWarning}
           modelsStatus={props.modelsStatus} modelsEnabled={props.modelsEnabled} modelsError={props.modelsError} />
-        <NumberField name="maxTokens" label={processText('summaryCap')} value={draft.maxTokens} min={1}
-          disabled={disabled} help={processText('followHeadroom')} error={fieldError('maxTokens')}
-          onChange={(maxTokens) => props.onDraft({ maxTokens })} />
-        {projected ? <p className="dsh-bc-caption" data-bc="draft-summary-note">{processText('summaryBudget') + ': ' + tokensText(projected.summary)}</p> : null}
+        <SettingRow label={processText('summaryCap')} desc={processText('followHeadroom')}>
+          {(labelId) => (
+            <NumberField name="maxTokens" label={processText('summaryCap')} value={draft.maxTokens} min={1}
+              labelledBy={labelId} inline={true} disabled={disabled} error={fieldError('maxTokens')}
+              onChange={(maxTokens) => props.onDraft({ maxTokens })} />
+          )}
+        </SettingRow>
       </Section>
       {draft.mode === 'custom'
         ? <PromptEditor value={draft.customPrompt} disabled={disabled} error={fieldError('customPrompt')} onChange={(customPrompt) => props.onDraft({ customPrompt })} />
@@ -563,47 +565,53 @@ export function ModelSection(props: ModelSectionProps): React.ReactElement {
   )
   return (
     <div className="dsh-bc-process-model">
-      <div className="dsh-bc-grid">
-        <Field name="summaryRoute" label={t('summaryModel')} error={props.fieldError('summarizationModel')}>
-          {(id, aria) => (
-            <Select {...aria} id={id} name="summaryRoute"
-              value={custom ? 'custom' : draft.provider === '' ? (customOpen ? 'custom' : '') : JSON.stringify([draft.provider, draft.model])}
-              disabled={disabled}
-              onChange={(event) => {
-                if (event.target.value === 'custom') { setCustomOpen(true); return }
-                setCustomOpen(false)
-                const [provider, model] = event.target.value === '' ? ['', ''] : JSON.parse(event.target.value) as [string, string]
-                props.onDraft({ provider, model })
-              }}>
-              <option value="">{t('followSessionModel') + (props.target ? ' \u00b7 ' + props.target.provider + '/' + props.target.model : '')}</option>
-              {routes.map((entry) => (
-                <option key={JSON.stringify([entry.provider, entry.model])} value={JSON.stringify([entry.provider, entry.model])}>
-                  {entry.provider + '/' + entry.model}
-                </option>
-              ))}
-              <option value="custom">{custom ? draft.provider + '/' + draft.model : t('customModelOption')}</option>
-            </Select>
-          )}
-        </Field>
-        {!native ? (
-          <Field name="reasoningEffort" label={t('reasoningEffort')} error={props.fieldError('reasoningEffort')}>
-            {(id, aria) => route ? (
-              <Select {...aria} id={id} name="reasoningEffort" value={draft.effort} disabled={disabled}
-                onChange={(event) => props.onDraft({ effort: event.target.value })}>
-                <option value="">{route.defaultEffort ? t('modelDefaultWith', { effort: route.defaultEffort }) : t('modelDefault')}</option>
-                {route.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-                {draft.effort !== '' && !route.efforts.includes(draft.effort)
-                  ? <option value={draft.effort}>{t('unsupportedEffortOption', { effort: draft.effort })}</option>
-                  : null}
+      <SettingRow label={t('summaryModel')} desc={processText('generationIntro')}>
+        {(labelId) => (
+          <Field name="summaryRoute" label={t('summaryModel')} labelledBy={labelId} error={props.fieldError('summarizationModel')}>
+            {(id, aria) => (
+              <Select {...aria} id={id} name="summaryRoute"
+                value={custom ? 'custom' : draft.provider === '' ? (customOpen ? 'custom' : '') : JSON.stringify([draft.provider, draft.model])}
+                disabled={disabled}
+                onChange={(event) => {
+                  if (event.target.value === 'custom') { setCustomOpen(true); return }
+                  setCustomOpen(false)
+                  const [provider, model] = event.target.value === '' ? ['', ''] : JSON.parse(event.target.value) as [string, string]
+                  props.onDraft({ provider, model })
+                }}>
+                <option value="">{t('followSessionModel') + (props.target ? ' \u00b7 ' + props.target.provider + '/' + props.target.model : '')}</option>
+                {routes.map((entry) => (
+                  <option key={JSON.stringify([entry.provider, entry.model])} value={JSON.stringify([entry.provider, entry.model])}>
+                    {entry.provider + '/' + entry.model}
+                  </option>
+                ))}
+                <option value="custom">{custom ? draft.provider + '/' + draft.model : t('customModelOption')}</option>
               </Select>
-            ) : (
-              <input {...aria} id={id} name="reasoningEffort" className="dsh-bc-input" value={draft.effort}
-                disabled={disabled} placeholder={t('effortUnknownPlaceholder')}
-                onChange={(event) => props.onDraft({ effort: event.target.value })} />
             )}
           </Field>
-        ) : null}
-      </div>
+        )}
+      </SettingRow>
+      {!native ? (
+        <SettingRow label={t('reasoningEffort')}>
+          {(labelId) => (
+            <Field name="reasoningEffort" label={t('reasoningEffort')} labelledBy={labelId} error={props.fieldError('reasoningEffort')}>
+              {(id, aria) => route ? (
+                <Select {...aria} id={id} name="reasoningEffort" value={draft.effort} disabled={disabled}
+                  onChange={(event) => props.onDraft({ effort: event.target.value })}>
+                  <option value="">{route.defaultEffort ? t('modelDefaultWith', { effort: route.defaultEffort }) : t('modelDefault')}</option>
+                  {route.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+                  {draft.effort !== '' && !route.efforts.includes(draft.effort)
+                    ? <option value={draft.effort}>{t('unsupportedEffortOption', { effort: draft.effort })}</option>
+                    : null}
+                </Select>
+              ) : (
+                <input {...aria} id={id} name="reasoningEffort" className="dsh-bc-input" value={draft.effort}
+                  disabled={disabled} placeholder={t('effortUnknownPlaceholder')}
+                  onChange={(event) => props.onDraft({ effort: event.target.value })} />
+              )}
+            </Field>
+          )}
+        </SettingRow>
+      ) : null}
       {showCustom ? (
         <div className="dsh-bc-custom-model" data-bc="custom-model">
           <div className="dsh-bc-grid">
@@ -815,35 +823,40 @@ export interface StatusSectionProps extends RuntimeBudgetProps {
 export function StatusSection(props: StatusSectionProps): React.ReactElement {
   const reasons = [...new Set([...(props.diagnostics ?? []), ...(props.reasons ?? [])].filter((entry) => typeof entry === 'string' && entry !== ''))]
   return (
-    <Section name="diagnostics" dataBc="diagnostics" title={t('statusSection')}
-      aside={<span className="dsh-bc-caption">{t('statusReadOnly')}</span>}>
-      {props.inspectError
-        ? <p className="dsh-bc-error" role="alert">{t('diagnosticsFailed', { message: props.inspectError })}</p>
-        : props.inspectLoading
-          ? <p className="dsh-bc-note" role="status" aria-busy={true}>{t('readingDiagnostics')}</p>
-          : props.sessionId === ''
-            ? <p className="dsh-bc-caption" data-bc="status-empty">{t('statusEmpty')}</p>
-            : (
-              <React.Fragment>
-                <p className="dsh-bc-caption" data-bc="engine-note">{engineNote(props.engine)}</p>
-                <RuntimeBudget {...props} />
-                <div className="dsh-bc-budget-view">
-                  <h4 className="dsh-bc-h4">{t('lastCompaction')}</h4>
-                  <LastCompaction record={props.record} emptyText={t('noCompaction')} />
-                </div>
-                {props.continuation ? (
-                  <div className="dsh-bc-continuation" data-bc="handoff-continuation">
-                    <h4 className="dsh-bc-h4">{t('handoffContinuation')}</h4>
-                    <p className="dsh-bc-note">{props.continuation.status === 'scheduled' ? t('continuationScheduled') : t('continuationSkipped')}</p>
-                    {props.continuation.blockers?.length
-                      ? <ul className="dsh-bc-bullets">{props.continuation.blockers.map((item, index) => <li key={index}>{item}</li>)}</ul>
-                      : null}
+    <details className="dsh-bc-details" data-bc="diagnostics" data-bc-section="diagnostics" onKeyDown={collapseDetails}>
+      <summary>
+        <span>{t('statusSection')}</span>
+        <span className="dsh-bc-caption">{t('statusReadOnly')}</span>
+      </summary>
+      <div className="dsh-bc-details-body">
+        {props.inspectError
+          ? <p className="dsh-bc-error" role="alert">{t('diagnosticsFailed', { message: props.inspectError })}</p>
+          : props.inspectLoading
+            ? <p className="dsh-bc-note" role="status" aria-busy={true}>{t('readingDiagnostics')}</p>
+            : props.sessionId === ''
+              ? <p className="dsh-bc-caption" data-bc="status-empty">{t('statusEmpty')}</p>
+              : (
+                <React.Fragment>
+                  <p className="dsh-bc-caption" data-bc="engine-note">{engineNote(props.engine)}</p>
+                  <RuntimeBudget {...props} />
+                  <div className="dsh-bc-budget-view">
+                    <h4 className="dsh-bc-h4">{t('lastCompaction')}</h4>
+                    <LastCompaction record={props.record} emptyText={t('noCompaction')} />
                   </div>
-                ) : null}
-              </React.Fragment>
-            )}
-      {reasons.length ? <Explain name="diagnostics-details" title={t('diagnosticsDetails', { count: reasons.length })}><ReasonList reasons={reasons} /></Explain> : null}
-    </Section>
+                  {props.continuation ? (
+                    <div className="dsh-bc-continuation" data-bc="handoff-continuation">
+                      <h4 className="dsh-bc-h4">{t('handoffContinuation')}</h4>
+                      <p className="dsh-bc-note">{props.continuation.status === 'scheduled' ? t('continuationScheduled') : t('continuationSkipped')}</p>
+                      {props.continuation.blockers?.length
+                        ? <ul className="dsh-bc-bullets">{props.continuation.blockers.map((item, index) => <li key={index}>{item}</li>)}</ul>
+                        : null}
+                    </div>
+                  ) : null}
+                </React.Fragment>
+              )}
+        {reasons.length ? <Explain name="diagnostics-details" title={t('diagnosticsDetails', { count: reasons.length })}><ReasonList reasons={reasons} /></Explain> : null}
+      </div>
+    </details>
   )
 }
 
@@ -976,26 +989,26 @@ function SummaryFontControl(): React.ReactElement {
   const font = useFontAsset()
   const installed = font.status?.installed === true
   const busy = font.installing
+  const status = font.loading
+    ? t('fontChecking')
+    : installed
+      ? t('fontInstalled', {
+        family: font.status?.family ?? '',
+        version: font.status?.version ?? '',
+        size: megabytes(font.status?.bytes ?? null),
+      })
+      : t('fontMissing')
   return (
-    <div className="dsh-bc-font-row" data-bc="summary-font">
-      <div className="dsh-bc-font-line">
-        <p className="dsh-bc-caption" data-bc="font-status">
-          {font.loading
-            ? t('fontChecking')
-            : installed
-              ? t('fontInstalled', {
-                family: font.status?.family ?? '',
-                version: font.status?.version ?? '',
-                size: megabytes(font.status?.bytes ?? null),
-              })
-              : t('fontMissing')}
-        </p>
-        <button type="button" className="dsh-bc-btn" data-bc="font-download"
-          disabled={busy || font.loading} aria-busy={busy}
-          onClick={() => { void font.install(installed) }}>
-          {busy ? t('fontDownloading') : installed ? t('fontRedownload') : t('fontDownload')}
-        </button>
-      </div>
+    <div data-bc="summary-font">
+      <SettingRow label={t('fontRow')} desc={<span data-bc="font-status">{status}</span>}>
+        {() => (
+          <button type="button" className="dsh-bc-btn" data-bc="font-download"
+            disabled={busy || font.loading} aria-busy={busy}
+            onClick={() => { void font.install(installed) }}>
+            {busy ? t('fontDownloading') : installed ? t('fontRedownload') : t('fontDownload')}
+          </button>
+        )}
+      </SettingRow>
       {font.error === null ? null : (
         <p className="dsh-bc-caption dsh-bc-font-error" role="alert" data-bc="font-error">{font.error}</p>
       )}
