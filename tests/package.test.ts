@@ -64,17 +64,17 @@ test('package metadata matches the published contract', () => {
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.repository.url, 'git+https://github.com/omdsh-dev/dsh-better-compact.git')
   assert.equal(pkg.engines.node, '^24.22.3 || >=26.13.1')
-  assert.equal(pkg.engines.dsh, '>=0.2.3-alpha.2 <0.3.0')
-  assert.equal(pkg.dependencies['@deepseek-ai/schemastery'], '~3.20.0-alpha.1')
+  assert.equal(pkg.engines.dsh, '>=0.2.3-alpha.3 <0.3.0')
+  assert.equal(pkg.dependencies['@deepseek-ai/schemastery'], '~3.20.0-alpha.2')
   // The summary-image renderer needs this prebuilt native canvas; it stays a
   // runtime dependency (lazily imported), never a devDependency or a bundle.
   assert.equal(typeof pkg.dependencies['@napi-rs/canvas'], 'string', '@napi-rs/canvas must stay in dependencies')
   assert.equal(pkg.devDependencies['@napi-rs/canvas'], undefined)
-  assert.equal(pkg.peerDependencies['@deepseek-ai/cordis'], '~4.2.0-alpha.1')
-  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-host-webserver'], '>=0.2.3-alpha.2 <0.3.0')
+  assert.equal(pkg.peerDependencies['@deepseek-ai/cordis'], '~4.2.0-alpha.2')
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-host-webserver'], '>=0.2.3-alpha.3 <0.3.0')
   assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-web-server'], undefined)
   for (const [name, range] of Object.entries(pkg.peerDependencies)) {
-    if (name.startsWith('@deepseek-ai/dsh-')) assert.equal(range, '>=0.2.3-alpha.2 <0.3.0', name)
+    if (name.startsWith('@deepseek-ai/dsh-')) assert.equal(range, '>=0.2.3-alpha.3 <0.3.0', name)
   }
   assert.deepEqual(pkg.dsh.bundle.patch, [
     './cordis.patch.yml',

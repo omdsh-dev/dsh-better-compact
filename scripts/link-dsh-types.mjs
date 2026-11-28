@@ -55,7 +55,7 @@ const source = await pickSource()
 if (source === undefined) {
   console.error('link-dsh-types: no DSH type tree found. Tried:\n  ' + candidates.join('\n  '))
   console.error('Set DSH_PACKAGE_ROOT, pass --from <dir>, or install one with:')
-  console.error('  npm install --prefix .dsh-dev/runtime @deepseek-ai/dsh@0.2.3-alpha.2')
+  console.error('  npm install --prefix .dsh-dev/runtime @deepseek-ai/dsh@0.2.3-alpha.3')
   process.exit(1)
 }
 

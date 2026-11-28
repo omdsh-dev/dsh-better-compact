@@ -476,7 +476,7 @@ The read-only payload is the shared contract the visual settings page renders; t
 ## Known pre-existing failure (not a regression)
 
 `scripts/runtime-smoke.mjs` stops at the model-switch turn of the
-`better-compact` preset realm on DSH 0.2.3-alpha.2:
+`better-compact` preset realm on DSH 0.2.3-alpha.3:
 
 ```
 MODEL_SWITCH_COMPACTION_FAILED: Cannot switch to it-noop/smaller: context
